@@ -6,3 +6,4 @@ requirements.txt
 .coverage
 .mypy_cache
 .pytest_cache
+notebook.ipynb

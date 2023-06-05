@@ -1,17 +1,14 @@
+from sklearn.model_selection import train_test_split
 from torch import nn, optim
 from torch.utils.data import DataLoader
-from sklearn.model_selection import train_test_split
 import torch
 from tqdm import tqdm
 import mlflow
 import boto3
+import re
+from minecraft_copilot_ml.data_loader import MinecraftSchematicsDataset
 
 from minecraft_copilot_ml.model import UNet3D
-from minecraft_copilot_ml.data_loader import (
-    MinecraftSchematicsDataset,
-    get_list_of_files,
-)
-
 
 if __name__ == "__main__":
     with mlflow.start_run():
@@ -26,8 +23,19 @@ if __name__ == "__main__":
         mlflow.log_param("n_unique_minecraft_blocks", N_UNIQUE_MINECRAFT_BLOCKS)
         mlflow.log_param("model", str(model))
 
-        # Train the model
-        file_list = get_list_of_files("/home/mehdi/minecraft-copilot-ml/minecraft-schematics")
+        # Download the right data files
+        s3_client = boto3.client("s3")
+        list_regex = [r".*"]
+        list_all_data_files = s3_client.list_objects(Bucket="minecraft-copilot-ml")
+        list_all_data_files_names = [x["Key"] for x in list_all_data_files["Contents"]]
+        list_all_filtered_data_files_names = [
+            file for file in list_all_data_files_names if any(re.match(regex, file) for regex in list_regex)
+        ]
+        for file in list_all_filtered_data_files_names:
+            s3_client.download_file("minecraft-copilot-ml", file, f"./minecraft_copilot_ml/data/{file}")
+
+        file_list = []
+
         train_files, test_files = train_test_split(file_list, test_size=0.2)
         train_dataset = MinecraftSchematicsDataset(train_files)
         test_dataset = MinecraftSchematicsDataset(test_files)
