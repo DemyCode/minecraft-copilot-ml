@@ -1,4 +1,4 @@
-
+[![Main pipeline](https://github.com/DemyCode/minecraft-copilot-ml/actions/workflows/master.yml/badge.svg?branch=master)](https://github.com/DemyCode/minecraft-copilot-ml/actions/workflows/master.yml)
 
 # Minecraft Copilot ML
 
