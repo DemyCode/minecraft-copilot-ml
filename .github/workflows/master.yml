@@ -6,7 +6,7 @@ on:
       - master
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: master-${{ github.ref }}
 
 jobs:
   validation:

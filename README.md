@@ -1,1 +1,44 @@
+
+
 # Minecraft Copilot ML
+
+This repository is the Machine Learning / Data Science part of the minecraft-copilot mod.
+The goal of this repository is to research the optimal Machine Learning model for the minecraft copilot.
+Once found the main pipeline will train the model and register the artifact in MLFlow registry for later use.
+### Usefull Links :
+
+- [MLFlow Registry](google.com): Register your model metrics and artifacts on this registry
+- [Public Data](google.com): Get your data from here
+
+## Requirements
+
+- [Python 3.10](google.com)
+- [pip](google.com)
+- [docker](google.com)
+
+## Local Installation
+
+```bash
+pip install poetry
+poetry export -f requirements.txt --output requirements.txt --without-hashes
+pip install -r requirements.txt
+rm requirements.txt
+```
+
+NOTE : We highly encourage you to use a [virtual environment](https://google.com).
+
+## Docker usage
+
+```
+docker build . -t minecraft-copilot-ml:latest
+docker run minecraft-copilot-ml:latest
+```
+
+## Development
+
+```bash
+pip install poetry
+poetry export --dev -f requirements.txt --output requirements.txt --without-hashes
+pip install -r requirements.txt
+rm requirements.txt
+```
