@@ -8,7 +8,8 @@ Once found the main pipeline will train the model and register the artifact in M
 ### Usefull Links :
 
 - [MLFlow Registry](google.com): Register your model metrics and artifacts on this registry
-- [Public Data](google.com): Get your data from here
+- [Public Data](http://minecraft-schematics-raw.s3.amazonaws.com/): Raw data used to train the model (schematics files of structures)
+- [Public Data (Processed 16x16x16)](http://minecraft-schematics-16.s3.amazonaws.com/): 16x16x16 cubes of blocks created from the raw data
 
 ## Requirements
 
