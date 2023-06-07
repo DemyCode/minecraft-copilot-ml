@@ -3,7 +3,7 @@ name: Validation pipeline
 on:
   pull_request:
     branches:
-      - main
+      - master
   workflow_call:
     secrets:
       GH_APP_ID:
