@@ -1,14 +1,14 @@
-from typing import List
 from sklearn.model_selection import train_test_split
 from torch import nn, optim
 from torch.utils.data import DataLoader
 import torch
 from tqdm import tqdm
 import mlflow
-import boto3
-import re
-from minecraft_copilot_ml.data_loader import MinecraftSchematicsDataset
+import requests
+import xmltodict
+import os
 
+from minecraft_copilot_ml.data_loader import MinecraftSchematicsDataset
 from minecraft_copilot_ml.model import UNet3D
 
 if __name__ == "__main__":
@@ -25,19 +25,20 @@ if __name__ == "__main__":
         mlflow.log_param("model", str(model))
 
         # Download the right data files
-        s3_client = boto3.client("s3")
-        list_regex = [r".*"]
-        list_all_data_files = s3_client.list_objects(Bucket="minecraft-copilot-ml")
-        list_all_data_files_names = [x["Key"] for x in list_all_data_files["Contents"]]
-        list_all_filtered_data_files_names = [
-            file for file in list_all_data_files_names if any(re.match(regex, file) for regex in list_regex)
-        ]
-        for file in list_all_filtered_data_files_names:
-            s3_client.download_file("minecraft-copilot-ml", file, f"./minecraft_copilot_ml/data/{file}")
+        xml_struct = requests.get("https://minecraft-schematics-16.s3.amazonaws.com/", allow_redirects=True)
+        xml_dict = xmltodict.parse(xml_struct.content)
+        list_all_data_files = [x["Key"] for x in xml_dict["ListBucketResult"]["Contents"]]
+        if "data" not in os.listdir():
+            os.mkdir("data")
+        for file in list_all_data_files:
+            array_16_16_16 = requests.get(
+                f"https://minecraft-schematics-16.s3.amazonaws.com/{file}", allow_redirects=True
+            )
+            with open(f"minecraft_copilot_ml/data/{file}", "wb") as f:
+                f.write(array_16_16_16.content)
 
-        file_list: List[str] = []
-
-        train_files, test_files = train_test_split(file_list, test_size=0.2)
+        list_all_data_files_written = [f"minecraft_copilot_ml/data/{x}" for x in list_all_data_files]
+        train_files, test_files = train_test_split(list_all_data_files_written, test_size=0.2)
         train_dataset = MinecraftSchematicsDataset(train_files)
         test_dataset = MinecraftSchematicsDataset(test_files)
 

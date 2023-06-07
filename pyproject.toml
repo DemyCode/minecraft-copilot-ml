@@ -20,6 +20,8 @@ scikit-learn = "^1.2.2"
 mlflow = "^2.3.2"
 boto3 = "^1.26.146"
 boto3-stubs = {extras = ["essential"], version = "^1.26.146"}
+xmltodict = "^0.13.0"
+types-requests = "^2.31.0.1"
 
 [tool.poetry.group.dev.dependencies]
 ipympl = "^0.9.3"
