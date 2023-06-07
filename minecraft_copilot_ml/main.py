@@ -1,3 +1,4 @@
+from typing import List
 from sklearn.model_selection import train_test_split
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -34,7 +35,7 @@ if __name__ == "__main__":
         for file in list_all_filtered_data_files_names:
             s3_client.download_file("minecraft-copilot-ml", file, f"./minecraft_copilot_ml/data/{file}")
 
-        file_list = []
+        file_list: List[str] = []
 
         train_files, test_files = train_test_split(file_list, test_size=0.2)
         train_dataset = MinecraftSchematicsDataset(train_files)
