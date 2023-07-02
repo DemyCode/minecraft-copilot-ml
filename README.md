@@ -13,9 +13,9 @@ Once found the main pipeline will train the model and register the artifact in M
 
 ## Requirements
 
-- [Python 3.10](google.com)
-- [pip](https://realpython.com/python-virtual-environments-a-primer/#how-can-you-work-with-a-python-virtual-environment)
-- [docker](google.com)
+- [Python 3.10](https://www.python.org/downloads/release/python-3100/)
+- [pip](https://pypi.org/project/pip/)
+- [docker](https://docs.docker.com/desktop/)
 
 ## Local Installation
 
@@ -26,7 +26,7 @@ pip install -r requirements.txt
 rm requirements.txt
 ```
 
-NOTE : We highly encourage you to use a [virtual environment](https://google.com).
+NOTE : We highly encourage you to use a [virtual environment](https://realpython.com/python-virtual-environments-a-primer/#how-can-you-work-with-a-python-virtual-environment).
 
 ## Docker usage
 
