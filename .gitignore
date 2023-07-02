@@ -7,3 +7,6 @@ requirements.txt
 .mypy_cache
 .pytest_cache
 notebook.ipynb
+data
+minecraft-schematics
+minecraft-schematics-16

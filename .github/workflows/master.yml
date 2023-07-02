@@ -39,7 +39,7 @@ jobs:
         ECR_REPOSITORY: minecraft-copilot-ml
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        BRANCH_NAME=$(echo '${{ github.ref }}' | sed 's/[^a-zA-Z0-9]/-/g')
+        BRANCH_NAME=$(echo '${{ github.ref }}' | sed 's/[^[:alnum:]\.\_\-]/-/g')
         docker pull $ECR_REGISTRY/$ECR_REPOSITORY:latest || echo 'The image does not exist yet.'
         docker build --cache-from $ECR_REGISTRY/$ECR_REPOSITORY:latest -t minecraft-copilot-ml .
         docker tag minecraft-copilot-ml $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
