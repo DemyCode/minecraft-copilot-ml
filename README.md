@@ -14,7 +14,7 @@ Once found the main pipeline will train the model and register the artifact in M
 ## Requirements
 
 - [Python 3.10](google.com)
-- [pip]([google.com](https://realpython.com/python-virtual-environments-a-primer/#how-can-you-work-with-a-python-virtual-environment))
+- [pip](https://realpython.com/python-virtual-environments-a-primer/#how-can-you-work-with-a-python-virtual-environment)
 - [docker](google.com)
 
 ## Local Installation
