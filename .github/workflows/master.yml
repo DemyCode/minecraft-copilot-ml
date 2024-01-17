@@ -1,0 +1,16 @@
+name: Main pipeline
+
+on:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: master-${{ github.ref }}
+
+jobs:
+  validation:
+    uses: ./.github/workflows/pull_request.yml
+    secrets:
+      GH_APP_ID: ${{ secrets.GH_APP_ID }}
+      GH_APP_KEY: ${{ secrets.GH_APP_KEY }}

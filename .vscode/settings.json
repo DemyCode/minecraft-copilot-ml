@@ -1,0 +1,19 @@
+{
+    "python.linting.mypyEnabled": true,
+    "python.linting.flake8Enabled": true,
+    "python.formatting.provider": "black",
+    "mypy-type-checker.args": [
+        "--config-file",
+        "./pyproject.toml"
+    ],
+    "mypy-type-checker.importStrategy": "fromEnvironment",
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.inlayHints.callArgumentNames": false,
+    "python.analysis.inlayHints.functionReturnTypes": false,
+    "python.analysis.inlayHints.pytestParameters": false,
+    "python.linting.mypyArgs": [
+        "--config-file",
+        "./pyproject.toml"
+    ],
+    "python.testing.pytestEnabled": true
+}
