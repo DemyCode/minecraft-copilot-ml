@@ -5,13 +5,7 @@ on:
 
 jobs:
   dispatcher:
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      repository-projects: write
-      security-events: write
-      statuses: write
+    permissions: write-all
     runs-on: ubuntu-latest
     steps:
       - name: Create GitHub App Token
