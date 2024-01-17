@@ -20,6 +20,6 @@ jobs:
         uses: peter-evans/repository-dispatch@v2
         with:
           token: ${{ steps.generate-token.outputs.token }}
-          repository: ${{ github.repository }}/minecraft-copilot
+          repository: ${{ github.repository_owner }}/minecraft-copilot
           event-type: alignment
           client-payload: '{"branch": "${{ github.ref }}"}'
