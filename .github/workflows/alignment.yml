@@ -3,14 +3,8 @@ name: Alignement
 on:
   push:
 
-# Permission can be added at job level or workflow level
-permissions:
-  contents: read
-  pull-requests: write
-
 jobs:
   dispatcher:
-    permissions: write-all
     runs-on: ubuntu-latest
     steps:
       - name: Create GitHub App Token
