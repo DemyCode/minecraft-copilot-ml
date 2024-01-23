@@ -20,32 +20,42 @@ repos:
         args: [--maxkb=1024]
       - id: end-of-file-fixer
 
-  - repo: https://github.com/psf/black
-    rev: 23.3.0
+  - repo: local
     hooks:
-      - id: black
+      - id: setup
+        name: setup
+        entry: poetry install
+        language: system
+        types: [python]
+        pass_filenames: false
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.3.0
-    hooks:
+      - id: check
+        name: check
+        entry: poetry check
+        language: system
+        types: [python]
+        pass_filenames: false
+
       - id: mypy
-        additional_dependencies:
-          [
-            pytest,
-            types-pillow,
-            "pydantic[dotenv]==1.10.11",
-            numpy,
-            torch,
-            types-requests,
-            types-xmltodict,
-            types-tqdm,
-            loguru,
-            pytorch-lightning,
-            mlflow
-          ]
-        args: [--config-file, pyproject.toml]
+        name: mypy
+        entry: poetry run mypy --config-file pyproject.toml
+        language: system
+        types: [python]
 
-  - repo: https://github.com/pycqa/flake8
-    rev: 6.0.0
-    hooks:
+      - id: black
+        name: black
+        entry: poetry run black --config pyproject.toml
+        language: system
+        types: [python]
+
       - id: flake8
+        name: flake8
+        entry: poetry run flake8 --config .flake8
+        language: system
+        types: [python]
+
+      - id: isort
+        name: isort
+        entry: poetry run isort
+        language: system
+        types: [python]
