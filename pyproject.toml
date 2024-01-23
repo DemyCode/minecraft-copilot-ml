@@ -37,6 +37,7 @@ coverage = "^7.2.7"
 matplotlib = "^3.7.1"
 pytest-watch = "^4.2.0"
 pytest-testmon = "^2.0.8"
+isort = "^5.13.2"
 
 [tool.black]
 line-length = 120
