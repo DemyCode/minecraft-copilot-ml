@@ -14,3 +14,31 @@ jobs:
     secrets:
       GH_APP_ID: ${{ secrets.GH_APP_ID }}
       GH_APP_KEY: ${{ secrets.GH_APP_KEY }}
+  
+  tag-and-changelog:
+    needs: validation
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.head_commit.message, 'chore(release):') == false
+    steps:
+      - name: Create GitHub App Token
+        uses: actions/create-github-app-token@v1.6.3
+        id: generate-token
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_KEY }}
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          submodules: recursive
+          fetch-depth: 0
+      - uses: actions/setup-node@v4.0.1
+        with:
+          node-version: 21
+      - run: npm install -g commit-and-tag-version
+      - run: |
+          git config --global user.name "DemyCode"
+          git config --global user.email "verycols@gmail.com"
+      - run: |
+          commit-and-tag-version
+      - run: git push --follow-tags
+    
