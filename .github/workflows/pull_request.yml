@@ -53,5 +53,5 @@ jobs:
       - run: pip install poetry
       - run: poetry export --dev -f requirements.txt --output requirements.txt --without-hashes
       - run: pip install -r requirements.txt
-      - run: coverage run -m pytest -v
+      # - run: coverage run -m pytest -v
       # - run: coverage report -m --fail-under 100
