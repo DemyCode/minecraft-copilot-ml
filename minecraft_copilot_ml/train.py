@@ -1,16 +1,16 @@
+import json
+import os
 from typing import Any, Set, Tuple
-from loguru import logger
+
 import mlflow  # type: ignore
 import numpy as np
-from sklearn.model_selection import train_test_split  # type: ignore
-from torch.utils.data import DataLoader
-from torch.utils.data import Dataset
-from tqdm import tqdm
-import os
-import torch
-from sklearn.preprocessing import OneHotEncoder  # type: ignore
 import pytorch_lightning as pl
-import json
+import torch
+from loguru import logger
+from sklearn.model_selection import train_test_split  # type: ignore
+from sklearn.preprocessing import OneHotEncoder  # type: ignore
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from minecraft_copilot_ml.environment import settings
 from minecraft_copilot_ml.model import UNet3D

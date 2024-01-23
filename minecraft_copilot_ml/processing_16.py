@@ -1,14 +1,14 @@
-import numpy as np
+import gc
 import os
-from tqdm import tqdm
-import nbtlib  # type: ignore
-from loguru import logger
 from pathlib import Path
 
-from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
-from minecraft_copilot_ml.data_loader import get_random_block_map
+import nbtlib  # type: ignore
+import numpy as np
+from loguru import logger
+from tqdm import tqdm
 
-import gc
+from minecraft_copilot_ml.data_loader import get_random_block_map
+from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
 
 list_of_forbidden_files = [
     "14281.schematic",

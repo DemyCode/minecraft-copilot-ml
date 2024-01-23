@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 import numpy as np
 
 from minecraft_copilot_ml.data_loader import get_random_block_map, list_files_of_s3

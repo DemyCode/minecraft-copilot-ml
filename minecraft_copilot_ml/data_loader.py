@@ -1,8 +1,9 @@
 import os
+
 import numpy as np
 import requests
-from tqdm import tqdm
 import xmltodict
+from tqdm import tqdm
 
 
 def get_list_of_files(path: str) -> list[str]:

@@ -1,7 +1,7 @@
 from minecraft_copilot_ml.processing_16 import (
-    list_of_forbidden_files,
-    convert_nbt_to_numpy_array_with_minecraft_ids,
     convert_all_nbts_to_numpy_array_with_minecraft_ids,
+    convert_nbt_to_numpy_array_with_minecraft_ids,
+    list_of_forbidden_files,
 )
 
 

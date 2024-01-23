@@ -10,19 +10,19 @@ packages = [{ include = "minecraft_copilot_ml" }]
 python = "^3.10"
 torch = "2.0.0"
 selenium = "^4.9.1"
-nbtlib = {git = "https://github.com/DemyCode/nbtlib.git", branch = "main"}
+nbtlib = { git = "https://github.com/DemyCode/nbtlib.git", branch = "main" }
 pandas = "^2.0.1"
 tqdm = "^4.65.0"
 scikit-learn = "^1.2.2"
 mlflow = "2.5.0"
 boto3 = "^1.26.146"
-boto3-stubs = {extras = ["essential"], version = "^1.26.146"}
+boto3-stubs = { extras = ["essential"], version = "^1.26.146" }
 xmltodict = "^0.13.0"
 types-requests = "^2.31.0.1"
 loguru = "^0.7.0"
 types-tqdm = "^4.65.0.1"
 types-xmltodict = "^0.13.0.2"
-pydantic = {version = "^1.10.11", extras = ["dotenv"]}
+pydantic = { version = "^1.10.11", extras = ["dotenv"] }
 pytorch-lightning = "2.0.4"
 
 [tool.poetry.group.dev.dependencies]
@@ -54,6 +54,10 @@ warn_unused_ignores = true
 
 [tool.coverage.run]
 source = ["minecraft_copilot_ml"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
 
 [build-system]
 requires = ["poetry-core"]

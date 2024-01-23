@@ -1,9 +1,10 @@
 from typing import Any
+
+import mlflow  # type: ignore
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
-import mlflow  # type: ignore
 
 
 class UNet3D(pl.LightningModule):
