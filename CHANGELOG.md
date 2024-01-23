@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.1.0...v1.2.0) (2024-01-23)
+
+
+### Features
+
+* add notebook to dl data ([16163ce](https://github.com/DemyCode/minecraft-copilot-ml/commit/16163ce8cc0d3c0f95d11fcf9ed4637234fa827a))
+
 ## 1.1.0 (2024-01-23)
 
 
