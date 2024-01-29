@@ -1,84 +1,72 @@
-import os
+# flake8: noqa: E203
 
+from typing import Tuple
+
+import nbtlib  # type: ignore
 import numpy as np
-import requests
-import xmltodict
-from tqdm import tqdm
+
+from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
 
 
-def get_list_of_files(path: str) -> list[str]:
-    list_files = os.listdir(path)
-    concat_files = [os.path.join(path, f) for f in list_files]
-    abs_path = [os.path.abspath(f) for f in concat_files]
-    return abs_path
-
-
-def random_block_destroyer(X: np.ndarray) -> np.ndarray:
-    return X.copy()
-
-
-def list_files_of_s3(
-    s3_public_link: str = "https://minecraft-schematics-raw.s3.amazonaws.com",
-    params: dict[str, str] = {"list-type": "2"},
-) -> list[str]:
-    r = requests.get("https://minecraft-schematics-raw.s3.amazonaws.com", params=params)
-    xml = xmltodict.parse(r.text)
-    list_of_files = [x["Key"] for x in xml["ListBucketResult"]["Contents"]]
-    if (
-        "ListBucketResult" in xml
-        and "NextContinuationToken" in xml["ListBucketResult"]
-        and xml["ListBucketResult"]["NextContinuationToken"] is not None
-    ):
-        list_of_files += list_files_of_s3(
-            s3_public_link,
-            params={"list-type": "2", "continuation-token": xml["ListBucketResult"]["NextContinuationToken"]},
-        )
-    return list_of_files
-
-
-lf_s3 = list_files_of_s3()
-
-
-def get_random_block_map(
+def create_noisy_block_map(
     block_map: np.ndarray,
-    sliding_window_width: int = 16,
-    sliding_window_height: int = 16,
-    sliding_window_depth: int = 16,
-    rand_x: int | None = None,
-    rand_y: int | None = None,
-    rand_z: int | None = None,
 ) -> np.ndarray:
-    if len(block_map.shape) != 3:
-        raise ValueError("block_map must be a 3d array")
-    PADDED_VALUE = 1
-    x = np.random.randint(-sliding_window_width + 1, block_map.shape[0]) if rand_x is None else rand_x
-    y = np.random.randint(-sliding_window_height + 1, block_map.shape[1]) if rand_y is None else rand_y
-    z = np.random.randint(-sliding_window_depth + 1, block_map.shape[2]) if rand_z is None else rand_z
-    return (
-        block_map.take(range(x + PADDED_VALUE, x + PADDED_VALUE + sliding_window_width), mode="clip", axis=0)
-        .take(range(y + PADDED_VALUE, y + PADDED_VALUE + sliding_window_height), mode="clip", axis=1)
-        .take(range(z + PADDED_VALUE, z + PADDED_VALUE + sliding_window_depth), mode="clip", axis=2)
+    random_percentage = np.random.random()
+    random_indices_from_focused_block_map = np.random.choice(
+        np.arange(block_map.size), replace=False, size=int(block_map.size * random_percentage)
     )
+    unraveled_indices = np.unravel_index(random_indices_from_focused_block_map, block_map.shape)
+    returned_block_map = block_map.copy()
+    returned_block_map[unraveled_indices] = -1
+    return returned_block_map
 
 
-def traverse_3d_array(
-    block_map: np.ndarray,
-    sliding_window_width: int = 16,
-    sliding_window_height: int = 16,
-    sliding_window_depth: int = 16,
-) -> list[np.ndarray]:
-    if len(block_map.shape) != 3:
-        raise ValueError("block_map must be a 3d array")
-    PADDED_VALUE = 1
-    block_list = []
-    padded = np.pad(block_map, (1, 1), mode="constant", constant_values=-1)
-    for x in tqdm(range(-sliding_window_width + 1, block_map.shape[0]), leave=False):
-        for y in tqdm(range(-sliding_window_height + 1, block_map.shape[1]), leave=False):
-            for z in tqdm(range(-sliding_window_depth + 1, block_map.shape[2]), leave=False):
-                new_block = (
-                    padded.take(range(x + PADDED_VALUE, x + PADDED_VALUE + sliding_window_width), mode="clip", axis=0)
-                    .take(range(y + PADDED_VALUE, y + PADDED_VALUE + sliding_window_height), mode="clip", axis=1)
-                    .take(range(z + PADDED_VALUE, z + PADDED_VALUE + sliding_window_depth), mode="clip", axis=2)
-                )
-                block_list.append(new_block)
-    return block_list
+def nbt_to_numpy_minecraft_map(
+    nbt_file: str,
+) -> np.ndarray:
+    res = nbtlib.load(nbt_file, gzipped=True, byteorder="big")
+    if "Palette" in res:
+        palette = {int(value): key for key, value in res["Palette"].unpack().items()}
+    else:
+        palette = default_palette
+    if "BlockData" in res:
+        block_data = res["BlockData"]
+    else:
+        block_data = res["Blocks"]
+    block_map = np.asarray(block_data).reshape(res["Width"], res["Height"], res["Length"])
+    block_map = np.vectorize(palette.get)(block_map)
+    return block_map
+
+
+def get_random_block_map_and_mask_coordinates(
+    minecraft_map: np.ndarray,
+    sliding_window_width: int,
+    sliding_window_height: int,
+    sliding_window_depth: int,
+) -> Tuple[np.ndarray, Tuple[int, int, int, int, int, int]]:
+    block_map = np.zeros((sliding_window_width, sliding_window_height, sliding_window_depth), dtype=np.int32)
+    minimum_width = min(sliding_window_width, minecraft_map.shape[0])
+    minimum_height = min(sliding_window_height, minecraft_map.shape[1])
+    minimum_depth = min(sliding_window_depth, minecraft_map.shape[2])
+    x_start = np.random.randint(0, minecraft_map.shape[0] - minimum_width + 1)
+    y_start = np.random.randint(0, minecraft_map.shape[1] - minimum_height + 1)
+    z_start = np.random.randint(0, minecraft_map.shape[2] - minimum_depth + 1)
+    x_end = x_start + minimum_width
+    y_end = y_start + minimum_height
+    z_end = z_start + minimum_depth
+    random_roll_x_value = np.random.randint(0, sliding_window_width - minimum_width + 1)
+    random_y_height_value = np.random.randint(0, sliding_window_height - minimum_height + 1)
+    random_roll_z_value = np.random.randint(0, sliding_window_depth - minimum_depth + 1)
+    block_map[
+        random_roll_x_value : random_roll_x_value + minimum_width,
+        random_y_height_value : random_y_height_value + minimum_height,
+        random_roll_z_value : random_roll_z_value + minimum_depth,
+    ] = minecraft_map[x_start:x_end, y_start:y_end, z_start:z_end]
+    return block_map, (
+        random_roll_x_value,
+        random_y_height_value,
+        random_roll_z_value,
+        minimum_width,
+        minimum_height,
+        minimum_depth,
+    )

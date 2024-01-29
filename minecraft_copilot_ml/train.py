@@ -1,119 +1,96 @@
-import json
-import os
-from typing import Any, Set, Tuple
+# flake8: noqa: E203
 
-import mlflow  # type: ignore
-import numpy as np
-import pytorch_lightning as pl
+import argparse
+import os
+from typing import Dict, List, Set, Tuple
+
 import torch
 from loguru import logger
-from sklearn.model_selection import train_test_split  # type: ignore
-from sklearn.preprocessing import OneHotEncoder  # type: ignore
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from minecraft_copilot_ml.environment import settings
-from minecraft_copilot_ml.model import UNet3D
+from minecraft_copilot_ml.data_loader import (
+    create_noisy_block_map,
+    get_random_block_map_and_mask_coordinates,
+    nbt_to_numpy_minecraft_map,
+)
+
+# from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
+# from minecraft_copilot_ml.model import UNet3D
 
 
 class MinecraftSchematicsDataset(Dataset):
-    def __init__(  # type: ignore
+    def __init__(
         self,
-        X_files: list[str],
-        y_files: list[str],
-        one_hot_encoder: OneHotEncoder,
+        schematics_list_files: List[str],
+        unique_blocks_dict: Dict[str, int],
     ) -> None:
-        self.x_files = X_files
-        self.y_files = y_files
-        self.one_hot_encoder = one_hot_encoder
+        self.schematics_list_files = schematics_list_files
+        self.unique_blocks_dict = unique_blocks_dict
 
     def __len__(self) -> int:
-        return len(self.x_files)
+        return len(self.schematics_list_files)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        x_file = self.x_files[idx]
-        y_file = self.y_files[idx]
-        x_array: np.ndarray = np.load(x_file, allow_pickle=True)
-        y_array: np.ndarray = np.load(y_file, allow_pickle=True)
-        x_array = self.one_hot_encoder.transform(x_array.reshape(-1, 1)).reshape(16, 16, 16, -1).transpose(3, 0, 1, 2)
-        y_array = self.one_hot_encoder.transform(y_array.reshape(-1, 1)).reshape(16, 16, 16, -1).transpose(3, 0, 1, 2)
-        return torch.from_numpy(x_array).float(), torch.from_numpy(y_array).float()
+        nbt_file = self.schematics_list_files[idx]
+        numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+        block_map, (
+            random_roll_x_value,
+            random_y_height_value,
+            random_roll_z_value,
+            minimum_width,
+            minimum_height,
+            minimum_depth,
+        ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
+        focused_block_map = block_map[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ]
+        noisy_focused_block_map = create_noisy_block_map(focused_block_map)
+        noisy_block_map = block_map.copy()
+        noisy_block_map[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = noisy_focused_block_map
+        return torch.from_numpy(block_map).long(), torch.from_numpy(noisy_block_map).long()
 
 
-def main() -> None:
-    if os.environ.get("MLFLOW_TRACKING_URI") is None:
-        logger.error("MLFLOW_TRACKING_URI is not set")
-        raise Exception()
-    X_HOME = settings.X_HOME
-    Y_HOME = settings.Y_HOME
-    # Download the right data files
+def main(argparser: argparse.ArgumentParser) -> None:
+    argparser.parse_args()
+    path_to_schematics = argparser.parse_args().path_to_schematics
+    path_to_output = argparser.parse_args().path_to_output
+    # epochs = argparser.parse_args().epochs
+    # batch_size = argparser.parse_args().batch_size
+    # learning_rate = argparser.parse_args().learning_rate
 
-    full_list_of_files_X = []
-    for root, _, files in os.walk(X_HOME):
-        for file in files:
-            full_list_of_files_X.append(os.path.join(root, file))
-    full_list_of_files_Y = []
-    for root, _, files in os.walk(Y_HOME):
-        for file in files:
-            full_list_of_files_Y.append(os.path.join(root, file))
-    full_list_of_files = full_list_of_files_X + full_list_of_files_Y
+    if not os.path.exists(path_to_output):
+        os.makedirs(path_to_output)
 
-    # Generating one hot encoding
-    one_hot_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-    unique_values_set: Set[Any] = set()
-    # only list on X files because y files are the same thing but with destroyed blocks
-    for file in tqdm(full_list_of_files, desc="Generating one hot encoding", smoothing=0):
-        array_16_16_16: np.ndarray = np.load(file, allow_pickle=True)
-        unique_values_set = unique_values_set.union(set(array_16_16_16.flatten()))
-    if "None" in unique_values_set:
-        unique_values_set.remove("None")
-    if None in unique_values_set:
-        unique_values_set.remove(None)
-    unique_values_list = list(unique_values_set)
-    one_hot_encoder.fit(np.array(unique_values_list).reshape(-1, 1))
+    schematics_list_files = []
+    for dirpath, _, filenames in os.walk(path_to_schematics):
+        schematics_list_files.extend([os.path.join(dirpath, filename) for filename in filenames])
+    logger.info(f"Found {len(schematics_list_files)} schematics files.")
 
-    BATCH_SIZE = 32
-    EPOCHS = 20
+    # Set the dictionary size to the number of unique blocks in the dataset.
+    unique_blocks: Set[str] = set()
+    for nbt_file in tqdm(schematics_list_files):
+        numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+        uinque_blocks_in_map = set(numpy_minecraft_map.flatten())
+        unique_blocks = unique_blocks.union(uinque_blocks_in_map)
+    unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
+    logger.info(f"Unique blocks: {unique_blocks_dict}")
 
-    # Splitting the data
-    X_train, X_test, y_train, y_test = train_test_split(
-        full_list_of_files_X, full_list_of_files_Y, test_size=0.2, random_state=42
-    )
-    logger.info(f"Initializing model with {len(unique_values_set)} classes")
-    model = UNet3D(len(unique_values_set))
-    used_cpus = 1
-    cpu_count = os.cpu_count()
-    if cpu_count is not None:
-        used_cpus = cpu_count // 2
-        logger.info(f"Using {used_cpus} cpus")
-
-    train_dataset = MinecraftSchematicsDataset(X_train, y_train, one_hot_encoder)
-    test_dataset = MinecraftSchematicsDataset(X_test, y_test, one_hot_encoder)
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=used_cpus,
-    )
-    val_loader = DataLoader(
-        test_dataset,
-        batch_size=BATCH_SIZE // 2,
-        shuffle=False,
-        num_workers=used_cpus,
-    )
-
-    trainer = pl.Trainer(
-        max_epochs=EPOCHS,
-        log_every_n_steps=1,
-    )
-    mlflow.pytorch.autolog()
-    experiment_id = mlflow.create_experiment("minecraft_copilot_ml")
-    with mlflow.start_run(experiment_id=experiment_id):
-        with open("categories.json", "w") as f:
-            json.dump(one_hot_encoder.categories_[0].tolist(), f)
-        mlflow.log_artifact("categories.json")
-        trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    schematics_dataset = MinecraftSchematicsDataset(schematics_list_files, unique_blocks_dict)
 
 
-if __name__ == "__main__":  # pragma: no cover
-    main()
+if __name__ == "__main__":
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--path-to-schematics", type=str, default="schematics_data")
+    argparser.add_argument("--path-to-output", type=str, default="output")
+    argparser.add_argument("--epochs", type=int, default=100)
+    argparser.add_argument("--batch-size", type=int, default=32)
+    argparser.add_argument("--learning-rate", type=float, default=0.001)
+
+    main(argparser)
