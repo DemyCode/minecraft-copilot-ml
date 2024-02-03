@@ -4,8 +4,13 @@ import argparse
 import os
 from typing import Dict, List, Set, Tuple
 
+import numpy as np
+import pytorch_lightning as pl
 import torch
 from loguru import logger
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
+from sklearn.model_selection import train_test_split  # type: ignore
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
@@ -14,9 +19,7 @@ from minecraft_copilot_ml.data_loader import (
     get_random_block_map_and_mask_coordinates,
     nbt_to_numpy_minecraft_map,
 )
-
-# from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
-# from minecraft_copilot_ml.model import UNet3D
+from minecraft_copilot_ml.model import UNet3D
 
 
 class MinecraftSchematicsDataset(Dataset):
@@ -31,7 +34,7 @@ class MinecraftSchematicsDataset(Dataset):
     def __len__(self) -> int:
         return len(self.schematics_list_files)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         nbt_file = self.schematics_list_files[idx]
         numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
         block_map, (
@@ -54,35 +57,81 @@ class MinecraftSchematicsDataset(Dataset):
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = noisy_focused_block_map
-        return torch.from_numpy(block_map).long(), torch.from_numpy(noisy_block_map).long()
+        mask = np.zeros((16, 16, 16), dtype=bool)
+        mask[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = True
+        return block_map, noisy_block_map, mask
 
 
 def main(argparser: argparse.ArgumentParser) -> None:
-    argparser.parse_args()
-    path_to_schematics = argparser.parse_args().path_to_schematics
-    path_to_output = argparser.parse_args().path_to_output
-    # epochs = argparser.parse_args().epochs
-    # batch_size = argparser.parse_args().batch_size
-    # learning_rate = argparser.parse_args().learning_rate
+    path_to_schematics: str = argparser.parse_args().path_to_schematics
+    path_to_output: str = argparser.parse_args().path_to_output
+    epochs: int = argparser.parse_args().epochs
+    batch_size: int = argparser.parse_args().batch_size
 
     if not os.path.exists(path_to_output):
         os.makedirs(path_to_output)
 
     schematics_list_files = []
-    for dirpath, _, filenames in os.walk(path_to_schematics):
-        schematics_list_files.extend([os.path.join(dirpath, filename) for filename in filenames])
+    tqdm_os_walk = tqdm(os.walk(path_to_schematics), leave=False, smoothing=0)
+    for dirpath, _, filenames in tqdm_os_walk:
+        for filename in filenames:
+            tqdm_os_walk.set_description(desc=f"Found {filename}")
+            schematics_list_files.append(os.path.join(dirpath, filename))
     logger.info(f"Found {len(schematics_list_files)} schematics files.")
 
     # Set the dictionary size to the number of unique blocks in the dataset.
     unique_blocks: Set[str] = set()
-    for nbt_file in tqdm(schematics_list_files):
-        numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+    tqdm_list_files = tqdm(schematics_list_files)
+    for nbt_file in tqdm_list_files:
+        tqdm_list_files.set_description(f"Processing {nbt_file}")
+        try:
+            numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+        except Exception as e:
+            logger.error(f"Could not load {nbt_file}")
+            logger.exception(e)
+            continue
         uinque_blocks_in_map = set(numpy_minecraft_map.flatten())
+        for block in uinque_blocks_in_map:
+            if block not in unique_blocks:
+                logger.info(f"Found new block: {block}")
         unique_blocks = unique_blocks.union(uinque_blocks_in_map)
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
     logger.info(f"Unique blocks: {unique_blocks_dict}")
 
-    schematics_dataset = MinecraftSchematicsDataset(schematics_list_files, unique_blocks_dict)
+    train_schematics_list_files, test_schematics_list_files = train_test_split(
+        schematics_list_files, test_size=0.2, random_state=42
+    )
+    train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files, unique_blocks_dict)
+    val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files, unique_blocks_dict)
+
+    num_workers = 1
+    cpu_count = os.cpu_count()
+    if cpu_count is not None:
+        num_workers = cpu_count
+
+    def collate_fn(batch: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        block_map, noisy_block_map, mask = zip(*batch)
+        return np.stack(block_map), np.stack(noisy_block_map), np.stack(mask)
+
+    train_schematics_dataloader = torch.utils.data.DataLoader(
+        train_schematics_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn
+    )
+    val_schematics_dataloader = torch.utils.data.DataLoader(
+        val_schematics_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=collate_fn
+    )
+
+    model = UNet3D(unique_blocks_dict)
+    csv_logger = CSVLogger(save_dir=path_to_output)
+    model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1)
+    trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs)
+    trainer.fit(model, train_schematics_dataloader, val_schematics_dataloader)
+
+    logger.info(f"Best val_loss is: {model_checkpoint.best_model_score}")
+    model.load_from_checkpoint(model_checkpoint.best_model_path)
 
 
 if __name__ == "__main__":
@@ -91,6 +140,5 @@ if __name__ == "__main__":
     argparser.add_argument("--path-to-output", type=str, default="output")
     argparser.add_argument("--epochs", type=int, default=100)
     argparser.add_argument("--batch-size", type=int, default=32)
-    argparser.add_argument("--learning-rate", type=float, default=0.001)
 
     main(argparser)

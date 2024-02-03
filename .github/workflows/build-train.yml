@@ -46,9 +46,9 @@ jobs:
           --algorithm-specification "TrainingImage=$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }},TrainingInputMode=File" \
           --role-arn arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/service-role/AmazonSageMaker-ExecutionRole-20230601T201737 \
           --resource-config InstanceCount=1,InstanceType=ml.g4dn.xlarge,VolumeSizeInGB=60 \
-          --stopping-condition MaxRuntimeInSeconds=72000 \
-          --environment X_HOME=/opt/ml/input/data/schematicsData/X,Y_HOME=/opt/ml/input/data/schematicsData/y,MLFLOW_TRACKING_URI=file:/opt/ml/checkpoints \
+          --stopping-condition MaxRuntimeInSeconds=36000 \
           \
+          --hyper-parameters "path-to-schematics=/opt/ml/input/data/schematicsData,path-to-output=/opt/ml/checkpoints" \
           --input-data-config '[{"ChannelName": "schematicsData","DataSource": {"S3DataSource": {"S3DataType": "S3Prefix","S3Uri": "s3://minecraft-schematics-16","S3DataDistributionType": "FullyReplicated"}}}]' \
-          --checkpoint-config "S3Uri=s3://minecraft-copilot-ml-training-job/checkpoints/${{ github.sha }},LocalPath=/opt/ml/checkpoints" \
-          --output-data-config S3OutputPath=s3://minecraft-copilot-ml-training-job/output/${{ github.sha }}
+          --checkpoint-config "S3Uri=s3://minecraft-copilot-ml-training-job/checkpoints/${{ github.ref }}_${{ github.sha }},LocalPath=/opt/ml/checkpoints" \
+          --output-data-config S3OutputPath=s3://minecraft-copilot-ml-training-job/output/${{ github.ref }}_${{ github.sha }}

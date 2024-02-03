@@ -24,3 +24,4 @@ model.pt
 lightning_logs
 *.hdf5
 categories.json
+schematics_data

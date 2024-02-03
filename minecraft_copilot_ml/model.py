@@ -1,6 +1,6 @@
-from typing import Any
+from typing import Any, Dict
 
-import mlflow  # type: ignore
+import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -8,10 +8,12 @@ import torch.nn.functional as F
 
 
 class UNet3D(pl.LightningModule):
-    def __init__(self, n_unique_minecraft_blocks: int) -> None:
+    def __init__(self, unique_blocks_dict: Dict[str, int]) -> None:
         super(UNet3D, self).__init__()
+        self.unique_blocks_dict = unique_blocks_dict
+        self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
         self.conv1 = nn.Sequential(
-            nn.Conv3d(n_unique_minecraft_blocks, 64, kernel_size=3, padding=1),
+            nn.Conv3d(len(self.unique_blocks_dict), 64, kernel_size=3, padding=1),
             nn.LeakyReLU(),
             nn.BatchNorm3d(num_features=64),
         )
@@ -46,12 +48,12 @@ class UNet3D(pl.LightningModule):
             nn.BatchNorm3d(num_features=64),
         )
         self.conv8 = nn.Sequential(
-            nn.Conv3d(64, n_unique_minecraft_blocks, kernel_size=3, padding=1),
+            nn.Conv3d(64, len(self.unique_blocks_dict), kernel_size=3, padding=1),
             nn.LeakyReLU(),
-            nn.BatchNorm3d(num_features=n_unique_minecraft_blocks),
+            nn.BatchNorm3d(num_features=len(self.unique_blocks_dict)),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def ml_core(self, x: torch.Tensor) -> torch.Tensor:
         out_conv1 = self.conv1(x)
         out_conv2 = self.conv2(out_conv1)
         out_conv3 = self.conv3(out_conv2)
@@ -60,28 +62,55 @@ class UNet3D(pl.LightningModule):
         out_conv6 = self.conv6(out_conv5) + out_conv2
         out_conv7 = self.conv7(out_conv6) + out_conv1
         out_conv8 = self.conv8(out_conv7) + x
-        return torch.softmax(out_conv8, dim=1)
+        return F.softmax(out_conv8, dim=1)
+
+    def pre_process(self, x: np.ndarray) -> torch.Tensor:
+        vectorized_x = np.vectorize(lambda x: self.unique_blocks_dict.get(x, self.unique_blocks_dict["minecraft:air"]))(
+            x
+        )
+        vectorized_x = vectorized_x.astype(np.int64)
+        x_tensor = torch.from_numpy(vectorized_x)
+        x_tensor_one_hot_encoded: torch.Tensor = torch.functional.F.one_hot(
+            x_tensor, num_classes=len(self.unique_blocks_dict)
+        ).permute(0, 4, 1, 2, 3)
+        x_tensor_one_hot_encoded = x_tensor_one_hot_encoded.float()
+        return x_tensor_one_hot_encoded
+
+    def post_process(self, x: torch.Tensor) -> np.ndarray:
+        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x)
+        return predicted_block_maps
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        x_tensor_one_hot_encoded = self.pre_process(x)
+        predicted_vectorized_block_maps = self.ml_core(x_tensor_one_hot_encoded)
+        processed_output = self.post_process(predicted_vectorized_block_maps)
+        return processed_output
+
+    def step(self, batch: torch.Tensor, batch_idx: int, mode: str) -> torch.Tensor:
+        block_maps, noisy_block_maps, masks = batch
+        pre_processed_block_maps = self.pre_process(block_maps)
+        pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps)
+        masks = torch.from_numpy(masks).float()
+        predicted_one_hot_block_maps: torch.Tensor = self.ml_core(pre_processed_noisy_block_maps)
+        loss = F.cross_entropy(predicted_one_hot_block_maps, pre_processed_block_maps, reduction="none")
+        loss = loss * masks
+        loss = loss.mean()
+        self.log(
+            f"{mode}_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            batch_size=block_maps.shape[0],
+        )
+        return loss
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        x, y = batch
-        y_hat: torch.Tensor = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        accuracy = (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        self.log("train_loss", loss, on_epoch=True, prog_bar=True)
-        self.log("train_accuracy", accuracy, on_epoch=True, prog_bar=True)
-        return loss
+        return self.step(batch, batch_idx, "train")
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
-        x, y = batch
-        y_hat: torch.Tensor = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        accuracy = (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        self.log("val_accuracy", accuracy, on_epoch=True, prog_bar=True)
-        return loss
+        return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
         return torch.optim.Adam(self.parameters(), lr=1e-3)
-
-    def on_validation_end(self) -> None:
-        mlflow.pytorch.log_model(self, f"model-{self.current_epoch}")
