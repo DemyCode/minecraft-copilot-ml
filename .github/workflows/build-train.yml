@@ -1,4 +1,4 @@
-name: Main pipeline
+name: Train Minecraft Copilot ML model
 
 on:
   workflow_dispatch:
