@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.2](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.3.1...v1.3.2) (2024-02-03)
+
+
+### Bug Fixes
+
+* adding more logging ([d9b04aa](https://github.com/DemyCode/minecraft-copilot-ml/commit/d9b04aa59591e27d548692c58bfdc655fa49621a))
+* better smoothing tqdm ([2b28aa8](https://github.com/DemyCode/minecraft-copilot-ml/commit/2b28aa8e1db04d06eff75e16709e2a35ca3730fd))
+* only training on the files that have been loaded ([cf94f7e](https://github.com/DemyCode/minecraft-copilot-ml/commit/cf94f7e72becd34162c7d2164a6845dfc250b2f4))
+
 ## [1.3.1](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.3.0...v1.3.1) (2024-02-03)
 
 
