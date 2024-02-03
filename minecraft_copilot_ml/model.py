@@ -77,7 +77,7 @@ class UNet3D(pl.LightningModule):
         return x_tensor_one_hot_encoded
 
     def post_process(self, x: torch.Tensor) -> np.ndarray:
-        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x)
+        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
         return predicted_block_maps
 
     def forward(self, x: np.ndarray) -> np.ndarray:

@@ -126,12 +126,15 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     model = UNet3D(unique_blocks_dict)
     csv_logger = CSVLogger(save_dir=path_to_output)
-    model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1)
+    model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1, save_last=True, mode="min")
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs)
     trainer.fit(model, train_schematics_dataloader, val_schematics_dataloader)
 
     logger.info(f"Best val_loss is: {model_checkpoint.best_model_score}")
-    model.load_from_checkpoint(model_checkpoint.best_model_path)
+    best_model = UNet3D.load_from_checkpoint(model_checkpoint.best_model_path, unique_blocks_dict=unique_blocks_dict)
+    torch.save(best_model, os.path.join(path_to_output, "best_model.pth"))
+    last_model = UNet3D.load_from_checkpoint(model_checkpoint.last_model_path, unique_blocks_dict=unique_blocks_dict)
+    torch.save(last_model, os.path.join(path_to_output, "last_model.pth"))
 
 
 if __name__ == "__main__":
