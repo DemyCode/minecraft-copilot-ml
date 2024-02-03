@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.2.1...v1.3.0) (2024-02-03)
+
+
+### Features
+
+* done training with special extractor ([54ac5da](https://github.com/DemyCode/minecraft-copilot-ml/commit/54ac5da853104ace87b940988085e1841abbe83f))
+
+
+### Bug Fixes
+
+* added some comments in notebook file for downloading data ([3c9fa33](https://github.com/DemyCode/minecraft-copilot-ml/commit/3c9fa33dc3523569c70281b10fc4d06dc057a29d))
+* changing minecraft pre flattening ids ([2ad4972](https://github.com/DemyCode/minecraft-copilot-ml/commit/2ad49727314663338ca22b2f4dfc9bebe397b6dc))
+* changing name of minecraft copilot ml model ([773942d](https://github.com/DemyCode/minecraft-copilot-ml/commit/773942d0ec56868f36d755e7abd53afe9a4e3f1e))
+* getting rid of tests ([b7fb239](https://github.com/DemyCode/minecraft-copilot-ml/commit/b7fb23903d8f352ca22ea9c5cd1aca234b91837f))
+* i dont even know ([a8af957](https://github.com/DemyCode/minecraft-copilot-ml/commit/a8af95755668075301eecb69f9ee1aabcbc798d7))
+
 ## [1.2.1](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.2.0...v1.2.1) (2024-01-24)
 
 
