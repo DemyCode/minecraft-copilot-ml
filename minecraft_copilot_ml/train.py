@@ -76,7 +76,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
         os.makedirs(path_to_output)
 
     schematics_list_files = []
-    tqdm_os_walk = tqdm(os.walk(path_to_schematics), leave=False, smoothing=0)
+    tqdm_os_walk = tqdm(os.walk(path_to_schematics), smoothing=0)
     for dirpath, _, filenames in tqdm_os_walk:
         for filename in filenames:
             tqdm_os_walk.set_description(desc=f"Found {filename}")
@@ -85,7 +85,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     # Set the dictionary size to the number of unique blocks in the dataset.
     unique_blocks: Set[str] = set()
-    tqdm_list_files = tqdm(schematics_list_files)
+    tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
     for nbt_file in tqdm_list_files:
         tqdm_list_files.set_description(f"Processing {nbt_file}")
         try:

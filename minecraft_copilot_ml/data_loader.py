@@ -22,7 +22,7 @@ list_of_forbidden_files = [
     # "11351.schematic",
     # "11314.schematic",
     # "14846.schem",
-    # "9171.schematic",
+    "9171.schematic",
     # "13441.schematic",
     # "15111.schem",
     # "452.schematic",
