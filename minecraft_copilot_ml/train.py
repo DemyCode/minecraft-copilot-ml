@@ -103,7 +103,10 @@ def main(argparser: argparse.ArgumentParser) -> None:
             logger.exception(e)
             continue
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
+
     logger.info(f"Unique blocks: {unique_blocks_dict}")
+    logger.info(f"Number of unique blocks: {len(unique_blocks_dict)}")
+    logger.info(f"Number of loaded schematics files: {len(loaded_schematic_files)}")
 
     train_schematics_list_files, test_schematics_list_files = train_test_split(
         loaded_schematic_files, test_size=0.2, random_state=42

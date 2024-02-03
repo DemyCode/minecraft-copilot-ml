@@ -11,22 +11,9 @@ from loguru import logger
 from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
 
 list_of_forbidden_files = [
-    # "14281.schematic",
-    # "12188.schematic",
-    # "8197.schematic",
-    # "576.schematic",
-    # "3322.schematic",
     "243.schematic",
-    # "13197.schematic",
-    # "15716.schem",
-    # "11351.schematic",
-    # "11314.schematic",
-    # "14846.schem",
     "9171.schematic",
-    # "13441.schematic",
-    # "15111.schem",
-    # "452.schematic",
-    # "1924.schematic",
+    "7519.schematic",
     "5381.schematic",
     "5984.schematic",
 ]
