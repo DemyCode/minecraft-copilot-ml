@@ -84,26 +84,29 @@ def main(argparser: argparse.ArgumentParser) -> None:
     logger.info(f"Found {len(schematics_list_files)} schematics files.")
 
     # Set the dictionary size to the number of unique blocks in the dataset.
+    # And also select the right files to load.
     unique_blocks: Set[str] = set()
+    loaded_schematic_files: List[str] = []
     tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
     for nbt_file in tqdm_list_files:
         tqdm_list_files.set_description(f"Processing {nbt_file}")
         try:
             numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+            unique_blocks_in_map = set(numpy_minecraft_map.flatten())
+            for block in unique_blocks_in_map:
+                if block not in unique_blocks:
+                    logger.info(f"Found new block: {block}")
+            unique_blocks = unique_blocks.union(unique_blocks_in_map)
+            loaded_schematic_files.append(nbt_file)
         except Exception as e:
             logger.error(f"Could not load {nbt_file}")
             logger.exception(e)
             continue
-        uinque_blocks_in_map = set(numpy_minecraft_map.flatten())
-        for block in uinque_blocks_in_map:
-            if block not in unique_blocks:
-                logger.info(f"Found new block: {block}")
-        unique_blocks = unique_blocks.union(uinque_blocks_in_map)
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
     logger.info(f"Unique blocks: {unique_blocks_dict}")
 
     train_schematics_list_files, test_schematics_list_files = train_test_split(
-        schematics_list_files, test_size=0.2, random_state=42
+        loaded_schematic_files, test_size=0.2, random_state=42
     )
     train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files, unique_blocks_dict)
     val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files, unique_blocks_dict)
