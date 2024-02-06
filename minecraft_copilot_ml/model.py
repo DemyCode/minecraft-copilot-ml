@@ -70,6 +70,7 @@ class UNet3D(pl.LightningModule):
         )
         vectorized_x = vectorized_x.astype(np.int64)
         x_tensor = torch.from_numpy(vectorized_x)
+        x_tensor = x_tensor.to("cuda" if torch.cuda.is_available() else "cpu")
         x_tensor_one_hot_encoded: torch.Tensor = torch.functional.F.one_hot(
             x_tensor, num_classes=len(self.unique_blocks_dict)
         ).permute(0, 4, 1, 2, 3)
@@ -90,7 +91,7 @@ class UNet3D(pl.LightningModule):
         block_maps, noisy_block_maps, masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
         pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps)
-        masks = torch.from_numpy(masks).float()
+        masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu")
         predicted_one_hot_block_maps: torch.Tensor = self.ml_core(pre_processed_noisy_block_maps)
         loss = F.cross_entropy(predicted_one_hot_block_maps, pre_processed_block_maps, reduction="none")
         loss = loss * masks

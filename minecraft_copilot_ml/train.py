@@ -115,7 +115,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
     val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files, unique_blocks_dict)
 
     num_workers = 1
-    cpu_count = os.cpu_count()
+    cpu_count = os.cpu_count() - 1
     if cpu_count is not None:
         num_workers = cpu_count
 
@@ -141,6 +141,10 @@ def main(argparser: argparse.ArgumentParser) -> None:
     torch.save(best_model, os.path.join(path_to_output, "best_model.pth"))
     last_model = UNet3D.load_from_checkpoint(model_checkpoint.last_model_path, unique_blocks_dict=unique_blocks_dict)
     torch.save(last_model, os.path.join(path_to_output, "last_model.pth"))
+
+    kwargs = {"bias": 3.0}
+    args = (torch.randn(2, 2, 2),)
+    onnx_program = torch.onnx.dynamo_export(best_model, args, **kwargs)
 
 
 if __name__ == "__main__":
