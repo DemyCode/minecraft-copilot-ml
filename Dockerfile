@@ -9,7 +9,7 @@ COPY pyproject.toml poetry.lock /app/
 RUN poetry export --without-hashes -f requirements.txt -o requirements.txt
 RUN pip install -r requirements.txt --no-cache-dir
 
-COPY README.md /app/
+COPY . /app/
 COPY minecraft_copilot_ml/ /app/minecraft_copilot_ml/
 RUN poetry install --only main --no-interaction --no-ansi
 

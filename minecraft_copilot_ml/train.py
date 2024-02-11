@@ -1,9 +1,10 @@
 # flake8: noqa: E203
-
 import argparse
+import json
 import os
 from typing import Dict, List, Set, Tuple
 
+import boto3
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -66,6 +67,16 @@ class MinecraftSchematicsDataset(Dataset):
         return block_map, noisy_block_map, mask
 
 
+def export_to_onnx(model: UNet3D, path_to_output: str) -> None:
+    torch.onnx.export(
+        model,
+        torch.randn(1, len(model.unique_blocks_dict), 16, 16, 16),
+        path_to_output,
+        input_names=["input"],
+        output_names=["output"],
+    )
+
+
 def main(argparser: argparse.ArgumentParser) -> None:
     path_to_schematics: str = argparser.parse_args().path_to_schematics
     path_to_output: str = argparser.parse_args().path_to_output
@@ -115,9 +126,9 @@ def main(argparser: argparse.ArgumentParser) -> None:
     val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files, unique_blocks_dict)
 
     num_workers = 1
-    cpu_count = os.cpu_count() - 1
+    cpu_count = os.cpu_count()
     if cpu_count is not None:
-        num_workers = cpu_count
+        num_workers = cpu_count - 1
 
     def collate_fn(batch: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         block_map, noisy_block_map, mask = zip(*batch)
@@ -136,22 +147,42 @@ def main(argparser: argparse.ArgumentParser) -> None:
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs)
     trainer.fit(model, train_schematics_dataloader, val_schematics_dataloader)
 
+    # Save the best and last model locally
     logger.info(f"Best val_loss is: {model_checkpoint.best_model_score}")
     best_model = UNet3D.load_from_checkpoint(model_checkpoint.best_model_path, unique_blocks_dict=unique_blocks_dict)
     torch.save(best_model, os.path.join(path_to_output, "best_model.pth"))
     last_model = UNet3D.load_from_checkpoint(model_checkpoint.last_model_path, unique_blocks_dict=unique_blocks_dict)
     torch.save(last_model, os.path.join(path_to_output, "last_model.pth"))
+    export_to_onnx(best_model, os.path.join(path_to_output, "best_model.onnx"))
+    export_to_onnx(last_model, os.path.join(path_to_output, "last_model.onnx"))
+    with open(os.path.join(path_to_output, "unique_blocks_dict.json"), "w") as f:
+        json.dump(unique_blocks_dict, f)
 
-    kwargs = {"bias": 3.0}
-    args = (torch.randn(2, 2, 2),)
-    onnx_program = torch.onnx.dynamo_export(best_model, args, **kwargs)
+    # Save the best and last model to S3
+    s3_client = boto3.client(
+        "s3",
+        region_name="eu-west-3",
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+    )
+    s3_client.upload_file(os.path.join(path_to_output, "best_model.pth"), "minecraft-copilot-models", "best_model.pth")
+    s3_client.upload_file(os.path.join(path_to_output, "last_model.pth"), "minecraft-copilot-models", "last_model.pth")
+    s3_client.upload_file(
+        os.path.join(path_to_output, "best_model.onnx"), "minecraft-copilot-models", "best_model.onnx"
+    )
+    s3_client.upload_file(
+        os.path.join(path_to_output, "last_model.onnx"), "minecraft-copilot-models", "last_model.onnx"
+    )
+    s3_client.upload_file(
+        os.path.join(path_to_output, "unique_blocks_dict.json"), "minecraft-copilot-models", "unique_blocks_dict.json"
+    )
 
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--path-to-schematics", type=str, default="schematics_data")
-    argparser.add_argument("--path-to-output", type=str, default="output")
-    argparser.add_argument("--epochs", type=int, default=100)
-    argparser.add_argument("--batch-size", type=int, default=32)
+    argparser.add_argument("--path-to-schematics", type=str, required=True)
+    argparser.add_argument("--path-to-output", type=str, required=True)
+    argparser.add_argument("--epochs", type=int, required=True)
+    argparser.add_argument("--batch-size", type=int, required=True)
 
     main(argparser)

@@ -23,3 +23,7 @@ notebook.ipynb
 requirements.txt
 .pre-commit-config.yaml
 __pycache__
+output
+schematics_data
+short_schematics_data
+lightning_logs
