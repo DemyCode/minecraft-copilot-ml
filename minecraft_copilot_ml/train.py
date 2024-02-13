@@ -96,7 +96,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     # Set the dictionary size to the number of unique blocks in the dataset.
     # And also select the right files to load.
-    unique_blocks: Set[str] = set()
+    unique_blocks: Set[str] = {"minecraft:air"}
     loaded_schematic_files: List[str] = []
     tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
     for nbt_file in tqdm_list_files:
@@ -141,7 +141,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
         val_schematics_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=collate_fn
     )
 
-    model = UNet3D(unique_blocks_dict)
+    model = UNetD(unique_blocks_dict)
     csv_logger = CSVLogger(save_dir=path_to_output)
     model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1, save_last=True, mode="min")
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs)

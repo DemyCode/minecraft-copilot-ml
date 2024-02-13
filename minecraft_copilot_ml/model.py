@@ -77,10 +77,6 @@ class UNet3D(pl.LightningModule):
         x_tensor_one_hot_encoded = x_tensor_one_hot_encoded.float()
         return x_tensor_one_hot_encoded
 
-    def post_process(self, x: torch.Tensor) -> np.ndarray:
-        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
-        return predicted_block_maps
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.ml_core(x)
 
@@ -111,4 +107,11 @@ class UNet3D(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+                "monitor": "val_loss",
+            },
+        }
