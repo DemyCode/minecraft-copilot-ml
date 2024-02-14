@@ -27,10 +27,8 @@ class MinecraftSchematicsDataset(Dataset):
     def __init__(
         self,
         schematics_list_files: List[str],
-        unique_blocks_dict: Dict[str, int],
     ) -> None:
         self.schematics_list_files = schematics_list_files
-        self.unique_blocks_dict = unique_blocks_dict
 
     def __len__(self) -> int:
         return len(self.schematics_list_files)
@@ -96,14 +94,19 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     # Set the dictionary size to the number of unique blocks in the dataset.
     # And also select the right files to load.
-    unique_blocks: Set[str] = {"minecraft:air"}
+    unique_blocks: Set[str] = set()
+    unique_counts: Dict[str, int] = {}
     loaded_schematic_files: List[str] = []
     tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
     for nbt_file in tqdm_list_files:
         tqdm_list_files.set_description(f"Processing {nbt_file}")
         try:
             numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
-            unique_blocks_in_map = set(numpy_minecraft_map.flatten())
+            unique_blocks_in_map, unique_counts_in_map = np.unique(numpy_minecraft_map, return_counts=True)
+            for block, count in zip(unique_blocks_in_map, unique_counts_in_map):
+                if block not in unique_counts:
+                    unique_counts[block] = 0
+                unique_counts[block] += count
             for block in unique_blocks_in_map:
                 if block not in unique_blocks:
                     logger.info(f"Found new block: {block}")
@@ -114,6 +117,8 @@ def main(argparser: argparse.ArgumentParser) -> None:
             logger.exception(e)
             continue
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
+    unique_counts_coefficients = np.array([unique_counts[block] for block in unique_blocks_dict])
+    unique_counts_coefficients = unique_counts_coefficients.sum() / unique_counts_coefficients
 
     logger.info(f"Unique blocks: {unique_blocks_dict}")
     logger.info(f"Number of unique blocks: {len(unique_blocks_dict)}")
@@ -122,8 +127,8 @@ def main(argparser: argparse.ArgumentParser) -> None:
     train_schematics_list_files, test_schematics_list_files = train_test_split(
         loaded_schematic_files, test_size=0.2, random_state=42
     )
-    train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files, unique_blocks_dict)
-    val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files, unique_blocks_dict)
+    train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files)
+    val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files)
 
     num_workers = 1
     cpu_count = os.cpu_count()
@@ -141,7 +146,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
         val_schematics_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=collate_fn
     )
 
-    model = UNetD(unique_blocks_dict)
+    model = UNet3D(unique_blocks_dict, unique_counts_coefficients)
     csv_logger = CSVLogger(save_dir=path_to_output)
     model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1, save_last=True, mode="min")
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs)

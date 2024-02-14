@@ -8,9 +8,12 @@ import torch.nn.functional as F
 
 
 class UNet3D(pl.LightningModule):
-    def __init__(self, unique_blocks_dict: Dict[str, int]) -> None:
+    def __init__(self, unique_blocks_dict: Dict[str, int], unique_counts_coefficients: np.ndarray) -> None:
         super(UNet3D, self).__init__()
         self.unique_blocks_dict = unique_blocks_dict
+        self.unique_counts_coefficients = torch.from_numpy(unique_counts_coefficients).float().to(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
         self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
         self.conv1 = nn.Sequential(
             nn.Conv3d(len(self.unique_blocks_dict), 64, kernel_size=3, padding=1),
@@ -76,6 +79,10 @@ class UNet3D(pl.LightningModule):
         ).permute(0, 4, 1, 2, 3)
         x_tensor_one_hot_encoded = x_tensor_one_hot_encoded.float()
         return x_tensor_one_hot_encoded
+    
+    def post_process(self, x: torch.Tensor) -> np.ndarray:
+        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
+        return predicted_block_maps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.ml_core(x)
@@ -87,6 +94,7 @@ class UNet3D(pl.LightningModule):
         masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu")
         predicted_one_hot_block_maps: torch.Tensor = self.ml_core(pre_processed_noisy_block_maps)
         loss = F.cross_entropy(predicted_one_hot_block_maps, pre_processed_block_maps, reduction="none")
+        loss = loss * self.unique_counts_coefficients[pre_processed_block_maps.argmax(dim=1)]
         loss = loss * masks
         loss = loss.mean()
         self.log(
