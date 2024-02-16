@@ -21,7 +21,7 @@ from minecraft_copilot_ml.data_loader import (
     list_schematic_files_in_folder,
     nbt_to_numpy_minecraft_map,
 )
-from minecraft_copilot_ml.model import UNet3D
+from minecraft_copilot_ml.model import VAE
 
 
 class MinecraftSchematicsDataset(Dataset):
@@ -66,7 +66,7 @@ class MinecraftSchematicsDataset(Dataset):
         return block_map, noisy_block_map, mask
 
 
-def export_to_onnx(model: UNet3D, path_to_output: str) -> None:
+def export_to_onnx(model: VAE, path_to_output: str) -> None:
     torch.onnx.export(
         model,
         torch.randn(1, len(model.unique_blocks_dict), 16, 16, 16).to("cuda" if torch.cuda.is_available() else "cpu"),
@@ -119,7 +119,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
         val_schematics_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=collate_fn
     )
 
-    model = UNet3D(unique_blocks_dict, unique_counts_coefficients)
+    model = VAE(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
     csv_logger = CSVLogger(save_dir=path_to_output)
     model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1, save_last=True, mode="min")
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs, log_every_n_steps=1)
@@ -127,13 +127,13 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     # Save the best and last model locally
     logger.info(f"Best val_loss is: {model_checkpoint.best_model_score}")
-    best_model = UNet3D.load_from_checkpoint(
+    best_model = VAE.load_from_checkpoint(
         model_checkpoint.best_model_path,
         unique_blocks_dict=unique_blocks_dict,
         unique_counts_coefficients=unique_counts_coefficients,
     )
     torch.save(best_model, os.path.join(path_to_output, "best_model.pth"))
-    last_model = UNet3D.load_from_checkpoint(
+    last_model = VAE.load_from_checkpoint(
         model_checkpoint.last_model_path,
         unique_blocks_dict=unique_blocks_dict,
         unique_counts_coefficients=unique_counts_coefficients,
