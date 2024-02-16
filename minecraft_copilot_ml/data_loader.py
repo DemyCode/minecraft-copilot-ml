@@ -1,12 +1,14 @@
 # flake8: noqa: E203
 import gc
+import os
 import re
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, List, Set, Tuple
 
 import nbtlib  # type: ignore
 import numpy as np
 from loguru import logger
+from tqdm import tqdm
 
 from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
 
@@ -33,7 +35,7 @@ list_of_forbidden_files = [
     "452.schematic",
     "1924.schematic",
     "785.schematic",
-    "4178.schematic"
+    "4178.schematic",
 ]
 
 
@@ -85,7 +87,9 @@ def get_random_block_map_and_mask_coordinates(
     sliding_window_height: int,
     sliding_window_depth: int,
 ) -> Tuple[np.ndarray, Tuple[int, int, int, int, int, int]]:
-    block_map = np.zeros((sliding_window_width, sliding_window_height, sliding_window_depth), dtype=object)
+    block_map = np.full(
+        (sliding_window_width, sliding_window_height, sliding_window_depth), "minecraft:air", dtype=object
+    )
     minimum_width = min(sliding_window_width, minecraft_map.shape[0])
     minimum_height = min(sliding_window_height, minecraft_map.shape[1])
     minimum_depth = min(sliding_window_depth, minecraft_map.shape[2])
@@ -111,3 +115,43 @@ def get_random_block_map_and_mask_coordinates(
         minimum_height,
         minimum_depth,
     )
+
+
+def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
+    schematics_list_files = []
+    tqdm_os_walk = tqdm(os.walk(path_to_schematics), smoothing=0)
+    for dirpath, _, filenames in tqdm_os_walk:
+        for filename in filenames:
+            tqdm_os_walk.set_description(desc=f"Found {filename}")
+            schematics_list_files.append(os.path.join(dirpath, filename))
+    logger.info(f"Found {len(schematics_list_files)} schematics files.")
+    return schematics_list_files
+
+
+def get_working_files_and_unique_blocks_and_counts(schematics_list_files: list[str]) -> None:
+    unique_blocks: Set[str] = set()
+    unique_counts: Dict[str, int] = {}
+    loaded_schematic_files: List[str] = []
+    tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
+    for nbt_file in tqdm_list_files:
+        tqdm_list_files.set_description(f"Processing {nbt_file}")
+        try:
+            numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+            unique_blocks_in_map, unique_counts_in_map = np.unique(numpy_minecraft_map, return_counts=True)
+            for block, count in zip(unique_blocks_in_map, unique_counts_in_map):
+                if block not in unique_counts:
+                    unique_counts[block] = 0
+                unique_counts[block] += count
+            for block in unique_blocks_in_map:
+                if block not in unique_blocks:
+                    logger.info(f"Found new block: {block}")
+            unique_blocks = unique_blocks.union(unique_blocks_in_map)
+            loaded_schematic_files.append(nbt_file)
+        except Exception as e:
+            logger.error(f"Could not load {nbt_file}")
+            logger.exception(e)
+            continue
+    unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
+    unique_counts_coefficients = np.array([unique_counts[block] for block in unique_blocks_dict])
+    unique_counts_coefficients = unique_counts_coefficients.sum() / unique_counts_coefficients
+    return unique_blocks_dict, unique_counts_coefficients, loaded_schematic_files
