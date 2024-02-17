@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
+import litemapy  # type: ignore
 import nbtlib  # type: ignore
 import numpy as np
 from loguru import logger
@@ -36,6 +37,9 @@ list_of_forbidden_files = [
     "1924.schematic",
     "785.schematic",
     "4178.schematic",
+    "19231.schematic",
+    "13942.schematic",
+    "4766.schematic",
 ]
 
 
@@ -52,6 +56,44 @@ def create_noisy_block_map(
     return returned_block_map
 
 
+def litematic_to_numpy_minecraft_map(
+    litematic_file: str,
+) -> np.ndarray:
+    nbt_loaded = litemapy.Schematic.load(litematic_file)
+    regions = nbt_loaded.regions
+    first_region = regions[list(regions.keys())[0]]
+    reg = first_region
+    # Print out the basic shape
+    numpy_map = np.zeros((len(reg.xrange()), len(reg.yrange()), len(reg.zrange())), dtype=object)
+    for x, i in zip(reg.xrange(), range(len(reg.xrange()))):
+        for y, j in zip(reg.yrange(), range(len(reg.yrange()))):
+            for z, k in zip(reg.zrange(), range(len(reg.zrange()))):
+                b = reg.getblock(x, y, z)
+                numpy_map[i, j, k] = b.blockid
+    return numpy_map
+
+
+def schematic_to_numpy_minecraft_map(
+    nbt_file: str,
+    gzipped: bool = True,
+) -> np.ndarray:
+    res = nbtlib.load(nbt_file, gzipped=gzipped, byteorder="big")
+    if "Palette" in res:
+        palette = {int(value): key for key, value in res["Palette"].unpack().items()}
+        palette = {key: re.sub(r"\[.*\]", "", value) for key, value in palette.items()}
+    else:
+        palette = default_palette
+    if "BlockData" in res:
+        block_data = res["BlockData"]
+    elif "Blocks" in res:
+        block_data = res["Blocks"]
+    else:
+        raise Exception(f"Could not find Blocks or BlockData in {nbt_file}. Known keys: {res.keys()}")
+    block_map = np.asarray(block_data).reshape(res["Height"], res["Length"], res["Width"])
+    block_map = np.vectorize(palette.get)(block_map)
+    return block_map
+
+
 def nbt_to_numpy_minecraft_map(
     nbt_file: str,
 ) -> np.ndarray:
@@ -60,26 +102,32 @@ def nbt_to_numpy_minecraft_map(
         raise Exception(
             f"File {nbt_file} is forbidden. Skipping. If this file is here it is because it generates a SIGKILL."
         )
-    res = None
-    try:
-        res = nbtlib.load(nbt_file, gzipped=True, byteorder="big")
-    except Exception as e:
-        logger.warning(f"Could not load {nbt_file}: {e}")
-        logger.info("Trying to load it as uncompressed")
-        res = nbtlib.load(nbt_file, gzipped=False, byteorder="big")
-    if "Palette" in res:
-        palette = {int(value): key for key, value in res["Palette"].unpack().items()}
-        palette = {key: re.sub(r"\[.*\]", "", value) for key, value in palette.items()}
-    else:
-        palette = default_palette
-    if "BlockData" in res:
-        block_data = res["BlockData"]
-    else:
-        block_data = res["Blocks"]
-    block_map = np.asarray(block_data).reshape(res["Height"], res["Length"], res["Width"])
-    block_map = np.vectorize(palette.get)(block_map)
-    return block_map
-
+    from functools import partial
+    function_to_file = [
+        litematic_to_numpy_minecraft_map,
+        partial(schematic_to_numpy_minecraft_map, gzipped=True),
+        partial(schematic_to_numpy_minecraft_map, gzipped=False),
+    ]
+    if nbt_file.endswith(".litematic"):
+        function_to_file = [
+            litematic_to_numpy_minecraft_map,
+            partial(schematic_to_numpy_minecraft_map, gzipped=True),
+            partial(schematic_to_numpy_minecraft_map, gzipped=False),
+        ]
+    if nbt_file.endswith(".schematic") or nbt_file.endswith(".schem"):
+        function_to_file = [
+            partial(schematic_to_numpy_minecraft_map, gzipped=True),
+            partial(schematic_to_numpy_minecraft_map, gzipped=False),
+            litematic_to_numpy_minecraft_map,
+        ]
+    final_exception = None
+    for function in function_to_file:
+        try:
+            return function(nbt_file)
+        except Exception as e:
+            logger.warning(f"Could not load {nbt_file} with {function}")
+            final_exception = e
+    logger.exception(final_exception)
 
 def get_random_block_map_and_mask_coordinates(
     minecraft_map: np.ndarray,

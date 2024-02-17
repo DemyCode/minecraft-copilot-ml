@@ -22,30 +22,44 @@ class VAE(pl.LightningModule):
 
         # Encoder
         self.encoder = nn.Sequential(
-            nn.Conv3d(len(unique_blocks_dict), 32, 3, padding=1),
+            nn.Conv3d(1, len(unique_blocks_dict), kernel_size=3, padding=1),
             nn.LeakyReLU(),
-            nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
             nn.LeakyReLU(),
-            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
             nn.LeakyReLU(),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            # lets go
             nn.Flatten(),
-            nn.Linear(128 * 2 * 2 * 2, 256),
+            nn.Linear(len(unique_blocks_dict) * 16 * 16 * 16, 2 * latent_dim),
             nn.LeakyReLU(),
-            nn.Linear(256, 2 * latent_dim),  # 2 * latent_dim for mean and variance
+            nn.Linear(2 * latent_dim, 2 * latent_dim),  # 2 * latent_dim for mean and variance
         )
 
         # Decoder
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, 256),
+            nn.Linear(latent_dim, 2 * latent_dim),
             nn.LeakyReLU(),
-            nn.Linear(256, 128 * 2 * 2 * 2),
+            nn.Linear(2 * latent_dim, len(unique_blocks_dict) * 16 * 16 * 16),
             nn.LeakyReLU(),
-            nn.Unflatten(1, (128, 2, 2, 2)),
-            nn.ConvTranspose3d(128, 64, kernel_size=3, stride=2, output_padding=1, padding=1),
+            nn.Unflatten(1, (len(unique_blocks_dict), 16, 16, 16)),
+            # lets go
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
             nn.LeakyReLU(),
-            nn.ConvTranspose3d(64, 32, kernel_size=3, stride=2, output_padding=1, padding=1),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
             nn.LeakyReLU(),
-            nn.ConvTranspose3d(32, len(unique_blocks_dict), kernel_size=3, stride=2, output_padding=1, padding=1),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
         )
 
     def reparameterize(self, mean, log_var):
@@ -76,7 +90,7 @@ class VAE(pl.LightningModule):
 
     def step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int, mode: str) -> torch.Tensor:
         block_maps, noisy_block_maps, masks = batch
-        pre_processed_block_maps = self.pre_process(block_maps)
+        pre_processed_block_maps = self.pre_process_noisy(block_maps)
         pre_processed_noisy_block_maps = self.pre_process_noisy(noisy_block_maps)
         masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
         reconstruction, mean, log_var = self.ml_core(pre_processed_noisy_block_maps)
@@ -145,3 +159,6 @@ class VAE(pl.LightningModule):
                 "monitor": "val_loss",
             },
         }
+
+    def on_train_start(self) -> None:
+        print(self)

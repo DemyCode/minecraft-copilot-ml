@@ -26,6 +26,7 @@ pydantic-settings = "^2.1.0"
 beautifulsoup4 = "^4.12.3"
 seaborn = "^0.13.2"
 onnx = "^1.15.0"
+litemapy = "^0.8.1b0"
 
 [tool.poetry.group.dev.dependencies]
 ipympl = "^0.9.3"
