@@ -143,7 +143,14 @@ class VAE(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+                "monitor": "val_loss",
+            },
+        }
 
     def on_train_start(self) -> None:
         print(self)
