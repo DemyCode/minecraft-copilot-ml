@@ -104,6 +104,11 @@ class VAE(pl.LightningModule):
         masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
         reconstruction, mean, log_var = self.ml_core(pre_processed_noisy_block_maps)
 
+        # Compute accuracy
+        accuracy = (reconstruction.argmax(dim=1) == pre_processed_block_maps).float()
+        accuracy = accuracy * masks
+        accuracy = accuracy.mean()
+
         # Compute reconstruction loss using categorical cross-entropy
         reconstruction_loss = F.cross_entropy(reconstruction, pre_processed_block_maps, reduction="none")
         reconstruction_loss = reconstruction_loss * masks
@@ -119,6 +124,7 @@ class VAE(pl.LightningModule):
             "reconstruction_loss": reconstruction_loss,
             "kl_divergence": kl_divergence,
             "loss": loss,
+            "accuracy": accuracy,
         }
         for name, value in loss_dict.items():
             self.log(
