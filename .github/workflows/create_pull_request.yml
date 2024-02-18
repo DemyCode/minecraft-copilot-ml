@@ -25,7 +25,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          git checkout ${{ github.base_ref }}
+          git checkout ${{ github.ref_name }}
           RESULT=$(git show-branch -a \
             | sed "s/].*//" \
             | grep "\*" \
