@@ -42,6 +42,7 @@ pytest-watch = "^4.2.0"
 pytest-testmon = "^2.0.8"
 isort = "^5.13.2"
 ipython = "^8.21.0"
+nbconvert = "^7.16.0"
 
 [tool.black]
 line-length = 120
