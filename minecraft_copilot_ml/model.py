@@ -159,7 +159,7 @@ class VAE(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
