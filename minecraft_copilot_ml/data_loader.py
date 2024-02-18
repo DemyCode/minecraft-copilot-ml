@@ -103,6 +103,7 @@ def nbt_to_numpy_minecraft_map(
             f"File {nbt_file} is forbidden. Skipping. If this file is here it is because it generates a SIGKILL."
         )
     from functools import partial
+
     function_to_file = [
         litematic_to_numpy_minecraft_map,
         partial(schematic_to_numpy_minecraft_map, gzipped=True),
@@ -128,6 +129,7 @@ def nbt_to_numpy_minecraft_map(
             logger.warning(f"Could not load {nbt_file} with {function}")
             final_exception = e
     logger.exception(final_exception)
+
 
 def get_random_block_map_and_mask_coordinates(
     minecraft_map: np.ndarray,
