@@ -36,3 +36,4 @@ jobs:
             -B "$RESULT" \
             -H "${{ github.ref }}" \
             --title "${{ github.ref }}"
+            --body "${{ github.ref }}"
