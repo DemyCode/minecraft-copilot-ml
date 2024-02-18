@@ -125,6 +125,7 @@ class VAE(pl.LightningModule):
             "kl_divergence": kl_divergence,
             "loss": loss,
             "accuracy": accuracy,
+            "learning_rate": self.trainer.optimizers[0].param_groups[0]["lr"],
         }
         for name, value in loss_dict.items():
             self.log(
