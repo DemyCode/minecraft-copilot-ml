@@ -2,7 +2,7 @@
 import argparse
 import json
 import os
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import boto3
 import numpy as np
@@ -21,7 +21,7 @@ from minecraft_copilot_ml.data_loader import (
     list_schematic_files_in_folder,
     nbt_to_numpy_minecraft_map,
 )
-from minecraft_copilot_ml.model import VAE
+from minecraft_copilot_ml.model import UNet3d
 
 
 class MinecraftSchematicsDataset(Dataset):
@@ -66,7 +66,7 @@ class MinecraftSchematicsDataset(Dataset):
         return block_map, noisy_block_map, mask
 
 
-def export_to_onnx(model: VAE, path_to_output: str) -> None:
+def export_to_onnx(model: UNet3d, path_to_output: str) -> None:
     torch.onnx.export(
         model,
         torch.randn(1, len(model.unique_blocks_dict), 16, 16, 16).to("cuda" if torch.cuda.is_available() else "cpu"),
@@ -81,11 +81,15 @@ def main(argparser: argparse.ArgumentParser) -> None:
     path_to_output: str = argparser.parse_args().path_to_output
     epochs: int = argparser.parse_args().epochs
     batch_size: int = argparser.parse_args().batch_size
+    dataset_limit: Optional[int] = argparser.parse_args().dataset_limit
 
     if not os.path.exists(path_to_output):
         os.makedirs(path_to_output)
 
     schematics_list_files = list_schematic_files_in_folder(path_to_schematics)
+    schematics_list_files = sorted(schematics_list_files)
+    if dataset_limit is not None:
+        schematics_list_files = schematics_list_files[:dataset_limit]
     # Set the dictionary size to the number of unique blocks in the dataset.
     # And also select the right files to load.
     unique_blocks_dict, unique_counts_coefficients, loaded_schematic_files = (
@@ -119,7 +123,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
         val_schematics_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=collate_fn
     )
 
-    model = VAE(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
+    model = UNet3d(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
     csv_logger = CSVLogger(save_dir=path_to_output)
     model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1, save_last=True, mode="min")
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs, log_every_n_steps=1)
@@ -127,13 +131,13 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     # Save the best and last model locally
     logger.info(f"Best val_loss is: {model_checkpoint.best_model_score}")
-    best_model = VAE.load_from_checkpoint(
+    best_model = UNet3d.load_from_checkpoint(
         model_checkpoint.best_model_path,
         unique_blocks_dict=unique_blocks_dict,
         unique_counts_coefficients=unique_counts_coefficients,
     )
     torch.save(best_model, os.path.join(path_to_output, "best_model.pth"))
-    last_model = VAE.load_from_checkpoint(
+    last_model = UNet3d.load_from_checkpoint(
         model_checkpoint.last_model_path,
         unique_blocks_dict=unique_blocks_dict,
         unique_counts_coefficients=unique_counts_coefficients,
@@ -170,5 +174,6 @@ if __name__ == "__main__":
     argparser.add_argument("--path-to-output", type=str, required=True)
     argparser.add_argument("--epochs", type=int, required=True)
     argparser.add_argument("--batch-size", type=int, required=True)
+    argparser.add_argument("--dataset-limit", type=int)
 
     main(argparser)
