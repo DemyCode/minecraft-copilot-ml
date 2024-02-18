@@ -30,11 +30,7 @@ jobs:
             grep -v "$(git rev-parse --abbrev-ref HEAD)" \
             head -n1 \
             sed "s/^.*\[//")
-          echo "base_branch=$RESULT" >> $GITHUB_OUTPUT
-        outputs:
-          base_branch: ${{ steps.identify_base_branch.outputs.base_branch }}
-      - run: |
           gh pr create \
-            -B ${{ steps.identify_base_branch.outputs.base_branch }} \
+            -B $RESULT \
             -H ${{ github.ref }} \
             --title ${{ github.ref }}
