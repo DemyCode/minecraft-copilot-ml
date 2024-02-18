@@ -94,9 +94,6 @@ class VAE(pl.LightningModule):
         reconstruction = F.softmax(reconstruction, dim=1)
         return reconstruction, mean, log_variance
 
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
-
     def step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int, mode: str) -> torch.Tensor:
         block_maps, noisy_block_maps, masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
@@ -160,13 +157,6 @@ class VAE(pl.LightningModule):
 
     def configure_optimizers(self) -> Any:
         return torch.optim.Adam(self.parameters(), lr=1e-3)
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
-                "monitor": "val_loss",
-            },
-        }
 
     def on_train_start(self) -> None:
         print(self)
