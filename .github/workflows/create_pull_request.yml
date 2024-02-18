@@ -20,12 +20,12 @@ jobs:
         with:
           token: ${{ steps.generate-token.outputs.token }}
           submodules: recursive
-          fetch-depth: 0
-      - name: Identify the base branch
-        id: identify_base_branch
+          fetch-depth: 0 
+      - name: Create Pull Request
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
+          git checkout ${{ github.base_ref }}
           RESULT=$(git show-branch -a \
             | sed "s/].*//" \
             | grep "\*" \
@@ -34,5 +34,4 @@ jobs:
             | sed "s/^.*\[//" )
           gh pr create \
             -B "$RESULT" \
-            -H "${{ github.ref }}" \
             --fill
