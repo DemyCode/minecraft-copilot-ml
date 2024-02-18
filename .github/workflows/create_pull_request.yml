@@ -1,0 +1,40 @@
+name: Create Pull Request
+
+on:
+  push:
+    branches:
+      - '*'
+      - '!master'
+
+jobs:
+  create_pull_request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub App Token
+        uses: actions/create-github-app-token@v1.6.3
+        id: generate-token
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          submodules: recursive
+          fetch-depth: 0
+      - name: Identify the base branch
+        id: identify_base_branch
+        run: |
+          RESULT=$(git show-branch -a \
+            sed "s/].*//" \
+            grep "\*" \
+            grep -v "$(git rev-parse --abbrev-ref HEAD)" \
+            head -n1 \
+            sed "s/^.*\[//")
+          echo "base_branch=$RESULT" >> $GITHUB_OUTPUT
+        outputs:
+          base_branch: ${{ steps.identify_base_branch.outputs.base_branch }}
+      - run: |
+          gh pr create \
+            -B ${{ steps.identify_base_branch.outputs.base_branch }} \
+            -H ${{ github.ref }} \
+            --title ${{ github.ref }}
