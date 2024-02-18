@@ -23,6 +23,8 @@ jobs:
           fetch-depth: 0
       - name: Identify the base branch
         id: identify_base_branch
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           RESULT=$(git show-branch -a \
             | sed "s/].*//" \
