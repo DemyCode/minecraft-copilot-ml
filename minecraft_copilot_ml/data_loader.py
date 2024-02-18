@@ -150,16 +150,16 @@ def get_random_block_map_and_mask_coordinates(
     y_end = y_start + minimum_height
     z_end = z_start + minimum_depth
     random_roll_x_value = np.random.randint(0, sliding_window_width - minimum_width + 1)
-    random_y_height_value = np.random.randint(0, sliding_window_height - minimum_height + 1)
+    random_roll_y_value = np.random.randint(0, sliding_window_height - minimum_height + 1)
     random_roll_z_value = np.random.randint(0, sliding_window_depth - minimum_depth + 1)
     block_map[
         random_roll_x_value : random_roll_x_value + minimum_width,
-        random_y_height_value : random_y_height_value + minimum_height,
+        random_roll_y_value : random_roll_y_value + minimum_height,
         random_roll_z_value : random_roll_z_value + minimum_depth,
     ] = minecraft_map[x_start:x_end, y_start:y_end, z_start:z_end]
     return block_map, (
         random_roll_x_value,
-        random_y_height_value,
+        random_roll_y_value,
         random_roll_z_value,
         minimum_width,
         minimum_height,

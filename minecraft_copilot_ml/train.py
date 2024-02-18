@@ -39,7 +39,7 @@ class MinecraftSchematicsDataset(Dataset):
         numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
         block_map, (
             random_roll_x_value,
-            random_y_height_value,
+            random_roll_y_value,
             random_roll_z_value,
             minimum_width,
             minimum_height,
@@ -47,20 +47,20 @@ class MinecraftSchematicsDataset(Dataset):
         ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
         focused_block_map = block_map[
             random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_y_value : random_roll_y_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ]
         noisy_focused_block_map = create_noisy_block_map(focused_block_map)
         noisy_block_map = block_map.copy()
         noisy_block_map[
             random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_y_value : random_roll_y_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = noisy_focused_block_map
         mask = np.zeros((16, 16, 16), dtype=bool)
         mask[
             random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_y_value : random_roll_y_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
         return block_map, noisy_block_map, mask
