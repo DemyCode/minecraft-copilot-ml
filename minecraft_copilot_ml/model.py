@@ -1,16 +1,17 @@
 # flake8: noqa: E203
-from typing import Any, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class VAE(pl.LightningModule):
-    def __init__(self, unique_blocks_dict, unique_counts_coefficients=None, latent_dim=64):
+    def __init__(self, unique_blocks_dict, train_len_dataloader, unique_counts_coefficients=None, latent_dim=64):
         super(VAE, self).__init__()
+        self.train_len_dataloader = train_len_dataloader
         self.unique_blocks_dict = unique_blocks_dict
         self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
         self.latent_dim = latent_dim
@@ -94,9 +95,6 @@ class VAE(pl.LightningModule):
         reconstruction = F.softmax(reconstruction, dim=1)
         return reconstruction, mean, log_variance
 
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
-
     def step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int, mode: str) -> torch.Tensor:
         block_maps, noisy_block_maps, masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
@@ -159,14 +157,11 @@ class VAE(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
-                "monitor": "val_loss",
-            },
-        }
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=1e-3, total_steps=self.trainer.estimated_stepping_batches
+        )
+        return [optimizer], [scheduler]
 
     def on_train_start(self) -> None:
         print(self)
