@@ -25,12 +25,12 @@ jobs:
         id: identify_base_branch
         run: |
           RESULT=$(git show-branch -a \
-            sed "s/].*//" \
-            grep "\*" \
-            grep -v "$(git rev-parse --abbrev-ref HEAD)" \
-            head -n1 \
-            sed "s/^.*\[//")
+            | sed "s/].*//" \
+            | grep "\*" \
+            | grep -v "$(git rev-parse --abbrev-ref HEAD)" \
+            | head -n1 \
+            | sed "s/^.*\[//" \)
           gh pr create \
-            -B $RESULT \
-            -H ${{ github.ref }} \
-            --title ${{ github.ref }}
+            -B "$RESULT" \
+            -H "${{ github.ref }}" \
+            --title "${{ github.ref }}"
