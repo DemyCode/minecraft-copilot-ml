@@ -1,5 +1,5 @@
 # flake8: noqa: E203
-from typing import Any, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -9,18 +9,24 @@ import torch.nn.functional as F
 
 
 class ConvBlock3d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, padding: int = 1):
         super(ConvBlock3d, self).__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
         self.bn = nn.BatchNorm3d(out_channels)
         self.relu = nn.LeakyReLU()
 
-    def forward(self, x):
-        return self.relu(self.bn(self.conv(x)))
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        result: torch.Tensor = self.relu(self.bn(self.conv(x)))
+        return result
 
 
 class UNet3d(pl.LightningModule):
-    def __init__(self, unique_blocks_dict, unique_counts_coefficients=None, latent_dim=64):
+    def __init__(
+        self,
+        unique_blocks_dict: Dict[str, int],
+        unique_counts_coefficients: Optional[np.ndarray] = None,
+        latent_dim: int = 64,
+    ):
         super(UNet3d, self).__init__()
         self.unique_blocks_dict = unique_blocks_dict
         self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
@@ -55,29 +61,29 @@ class UNet3d(pl.LightningModule):
         out_conv_7 = self.conv7(out_conv_6) + out_conv_2
         out_conv_8 = self.conv8(out_conv_7) + out_conv_1
         out_conv_9 = self.conv9(out_conv_8) + out_conv_input
-        out_conv_output = self.conv_output(out_conv_9)
+        out_conv_output: torch.Tensor = self.conv_output(out_conv_9)
         return out_conv_output
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         reconstruction = self.ml_core(x)
         reconstruction = F.softmax(reconstruction, dim=1)
         return reconstruction
 
-    def step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int, mode: str) -> torch.Tensor:
+    def step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int, mode: str) -> torch.Tensor:
         block_maps, noisy_block_maps, masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
         pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps).float().unsqueeze(1)
-        masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
+        tensor_masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
         reconstruction = self.ml_core(pre_processed_noisy_block_maps)
 
         # Compute accuracy
         accuracy = (reconstruction.argmax(dim=1) == pre_processed_block_maps).float()
-        accuracy = accuracy * masks
+        accuracy = accuracy * tensor_masks
         accuracy = accuracy.mean()
 
         # Compute reconstruction loss using categorical cross-entropy
         reconstruction_loss = F.cross_entropy(reconstruction, pre_processed_block_maps, reduction="none")
-        reconstruction_loss = reconstruction_loss * masks
+        reconstruction_loss = reconstruction_loss * tensor_masks
         reconstruction_loss = reconstruction_loss * self.unique_counts_coefficients[pre_processed_block_maps]
         reconstruction_loss = reconstruction_loss.mean()
 
@@ -114,10 +120,10 @@ class UNet3d(pl.LightningModule):
         predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
         return predicted_block_maps
 
-    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int) -> torch.Tensor:
         return self.step(batch, batch_idx, "train")
 
-    def validation_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int) -> torch.Tensor:
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:

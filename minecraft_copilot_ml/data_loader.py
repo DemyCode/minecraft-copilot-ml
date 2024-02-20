@@ -3,7 +3,7 @@ import gc
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 
 import litemapy  # type: ignore
 import nbtlib  # type: ignore
@@ -40,7 +40,7 @@ list_of_forbidden_files = [
     "19231.schematic",
     "13942.schematic",
     "4766.schematic",
-    "10380.schematic"
+    "10380.schematic",
 ]
 
 
@@ -106,7 +106,7 @@ def nbt_to_numpy_minecraft_map(
         )
     from functools import partial
 
-    function_to_file = [
+    function_to_file: List[Callable[[str], np.ndarray]] = [
         litematic_to_numpy_minecraft_map,
         partial(schematic_to_numpy_minecraft_map, gzipped=True),
         partial(schematic_to_numpy_minecraft_map, gzipped=False),
@@ -181,7 +181,9 @@ def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
     return schematics_list_files
 
 
-def get_working_files_and_unique_blocks_and_counts(schematics_list_files: list[str]) -> None:
+def get_working_files_and_unique_blocks_and_counts(
+    schematics_list_files: list[str],
+) -> Tuple[Dict[str, int], np.ndarray, list[str]]:
     unique_blocks: Set[str] = set()
     unique_counts: Dict[str, int] = {}
     loaded_schematic_files: List[str] = []
