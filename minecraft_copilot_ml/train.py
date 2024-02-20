@@ -2,7 +2,7 @@
 import argparse
 import json
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 import boto3
 import numpy as np
@@ -69,7 +69,7 @@ class MinecraftSchematicsDataset(Dataset):
 def export_to_onnx(model: UNet3d, path_to_output: str) -> None:
     torch.onnx.export(
         model,
-        torch.randn(1, len(model.unique_blocks_dict), 16, 16, 16).to("cuda" if torch.cuda.is_available() else "cpu"),
+        torch.randn(1, 1, 16, 16, 16).to("cuda" if torch.cuda.is_available() else "cpu"),
         path_to_output,
         input_names=["input"],
         output_names=["output"],
@@ -107,20 +107,15 @@ def main(argparser: argparse.ArgumentParser) -> None:
     train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files)
     val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files)
 
-    num_workers = 1
-    cpu_count = os.cpu_count()
-    if cpu_count is not None:
-        num_workers = cpu_count - 1
-
     def collate_fn(batch: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         block_map, noisy_block_map, mask = zip(*batch)
         return np.stack(block_map), np.stack(noisy_block_map), np.stack(mask)
 
     train_schematics_dataloader = torch.utils.data.DataLoader(
-        train_schematics_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn
+        train_schematics_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
     val_schematics_dataloader = torch.utils.data.DataLoader(
-        val_schematics_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=collate_fn
+        val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn
     )
 
     model = UNet3d(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
