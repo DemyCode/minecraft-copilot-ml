@@ -53,3 +53,9 @@ jobs:
       - run: poetry install
       - run: poetry run coverage run -m pytest -v
       - run: poetry run coverage report -m --fail-under 100
+      - run: poetry run coverage html
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public

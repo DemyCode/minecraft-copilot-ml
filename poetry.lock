@@ -2296,18 +2296,14 @@ version = "2.0.4"
 description = "A python package to read and edit nbt data"
 category = "main"
 optional = false
-python-versions = "^3.8"
-files = []
-develop = false
+python-versions = ">=3.8,<4.0"
+files = [
+    {file = "nbtlib-2.0.4-py3-none-any.whl", hash = "sha256:38d571fbf2f7ebd640639461b47fc79919a8ea8e74633ffcc8aa6b2acfc9c889"},
+    {file = "nbtlib-2.0.4.tar.gz", hash = "sha256:d4b861047fb9beb546a2e3f3b776dc61b0fb5831375752a39961882e2f76cc93"},
+]
 
 [package.dependencies]
 numpy = "*"
-
-[package.source]
-type = "git"
-url = "https://github.com/DemyCode/nbtlib.git"
-reference = "main"
-resolved_reference = "a6c0cd949e10f189581ca11026a0c600ee298e11"
 
 [[package]]
 name = "nest-asyncio"
@@ -4350,4 +4346,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "9a8d3cc142c4be7ceeac4b0c5cfd31447d0a38872814ff35ce29e6d32c48e163"
+content-hash = "da69d5afa724dab218de46937ea570c96d1852020a3d7ac6ca0fd5c0cba039bb"
