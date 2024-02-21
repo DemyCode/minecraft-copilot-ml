@@ -63,9 +63,7 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./htmlcov
           publish_branch: gh-pages
-          cname: coverage.example.com
-          commit_message: "Deploy coverage report"
-          destination_dir: ${{ github.event.number }}
+          publish_dir: htmlcov
+          destination_dir: ${{ github.ref_name }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
