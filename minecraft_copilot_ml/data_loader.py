@@ -47,15 +47,14 @@ list_of_forbidden_files = [
 def create_noisy_block_map(
     block_map: np.ndarray,
 ) -> np.ndarray:
-    x_start = np.random.randint(0, block_map.shape[0] - 1) if block_map.shape[0] > 1 else 0
-    y_start = np.random.randint(0, block_map.shape[1] - 1) if block_map.shape[1] > 1 else 0
-    z_start = np.random.randint(0, block_map.shape[2] - 1) if block_map.shape[2] > 1 else 0
-    x_end = np.random.randint(x_start + 1, block_map.shape[0]) if block_map.shape[0] > 1 else 1
-    y_end = np.random.randint(y_start + 1, block_map.shape[1]) if block_map.shape[1] > 1 else 1
-    z_end = np.random.randint(z_start + 1, block_map.shape[2]) if block_map.shape[2] > 1 else 1
-    result_block_map = block_map.copy()
-    result_block_map[x_start:x_end, y_start:y_end, z_start:z_end] = "minecraft:air"
-    return result_block_map
+    random_percentage = np.random.random()
+    random_indices_from_focused_block_map = np.random.choice(
+        np.arange(block_map.size), replace=False, size=int(block_map.size * random_percentage)
+    )
+    unraveled_indices = np.unravel_index(random_indices_from_focused_block_map, block_map.shape)
+    returned_block_map = block_map.copy()
+    returned_block_map[unraveled_indices] = "minecraft:air"
+    return returned_block_map
 
 
 def litematic_to_numpy_minecraft_map(
