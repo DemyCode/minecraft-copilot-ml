@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.4.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.3.3...v1.4.0) (2024-02-21)
+
+
+### Features
+
+* add coefficients on counts of blocks ([a817453](https://github.com/DemyCode/minecraft-copilot-ml/commit/a8174539f0adb9bab91aa75f1dd5921e2f109371))
+* adding accuracy calculation in steps ([4128bc5](https://github.com/DemyCode/minecraft-copilot-ml/commit/4128bc574892b00b3261058cb3e5df419a517b35))
+* creating coverage on the fly7 ([ba1e138](https://github.com/DemyCode/minecraft-copilot-ml/commit/ba1e1383ed778b4e481ad1ca9509bd8baf784e6d))
+* real training script ([56cb47e](https://github.com/DemyCode/minecraft-copilot-ml/commit/56cb47e7635185f8cd202f7790afbc66080f5bd5))
+
+
+### Bug Fixes
+
+* activating the coverage and pytest ([9170c7f](https://github.com/DemyCode/minecraft-copilot-ml/commit/9170c7f3ba57e80198d8a60d25de73ab5cd75c6b))
+* adding auto PR ([4ccbc45](https://github.com/DemyCode/minecraft-copilot-ml/commit/4ccbc45d84341955722ceb6c99ecbbb430ff2114))
+* adding fallback if PR already exists ([611d7a9](https://github.com/DemyCode/minecraft-copilot-ml/commit/611d7a92995c1b7d17c88ca8811b042970178519))
+* adding ipython ([f8e17dc](https://github.com/DemyCode/minecraft-copilot-ml/commit/f8e17dc147ec9d3a8230564020d7a1c6ec3d1da2))
+* adding more files to the corrupted files ([c6fdc9b](https://github.com/DemyCode/minecraft-copilot-ml/commit/c6fdc9ba52b90bfed0267843f164c2eaad39495a))
+* adding new notebook ([257a140](https://github.com/DemyCode/minecraft-copilot-ml/commit/257a140f638796e3e8e52fb3ed3456f4e7736a75))
+* batchnorm is a failure ([0d5e7a0](https://github.com/DemyCode/minecraft-copilot-ml/commit/0d5e7a0a705ca1f5ae6d23d6e9bed71b18e5779d))
+* best model to date ([5de72b9](https://github.com/DemyCode/minecraft-copilot-ml/commit/5de72b94a2ffcae99efe944fdf5367ec093fd5a2))
+* best model to date ([2064f4a](https://github.com/DemyCode/minecraft-copilot-ml/commit/2064f4a8b7a1ce542c0b5cf63c9d98bf6d2e0216))
+* best of best models to date ([a8e8787](https://github.com/DemyCode/minecraft-copilot-ml/commit/a8e8787b3885a9043e5e38adf089cd3b1255558e))
+* black format ([d34adb8](https://github.com/DemyCode/minecraft-copilot-ml/commit/d34adb8eab1eabed9541e2c3f87571c7eaf5f314))
+* changing y variable ([d6ec31d](https://github.com/DemyCode/minecraft-copilot-ml/commit/d6ec31dc1e3e87ab7c3095127b84bf203a283ec4))
+* echoing the FUCKING RESUILT MESSAGE !!!!!!!!! ([8c04a8f](https://github.com/DemyCode/minecraft-copilot-ml/commit/8c04a8f114fef72867751487ca2760d65e780d93))
+* finally using the correct titile and body ([cf3f52e](https://github.com/DemyCode/minecraft-copilot-ml/commit/cf3f52ed29152f199568218b4b28e2290a317d5f))
+* fix pre commit ([6d05fa5](https://github.com/DemyCode/minecraft-copilot-ml/commit/6d05fa54add26da315a188c50a881bec0f05f6d8))
+* fixing pre commit ([b5cf8fa](https://github.com/DemyCode/minecraft-copilot-ml/commit/b5cf8fa8a8c63be5ad402d0a221be62ef3e14320))
+* fixing pull request creator ([6efa6c6](https://github.com/DemyCode/minecraft-copilot-ml/commit/6efa6c696ddd9b7ed79cabca58e9013c83aeb584))
+* idk ([bfedf96](https://github.com/DemyCode/minecraft-copilot-ml/commit/bfedf968b00eeddfbabe684aa5033cc8558bfd5f))
+* idk ([e092741](https://github.com/DemyCode/minecraft-copilot-ml/commit/e09274111d4bdf3aeef1c5a7c44077cc460cac34))
+* idk ([8496b00](https://github.com/DemyCode/minecraft-copilot-ml/commit/8496b007c7f0289a79de06ea023a270f178296b3))
+* idl ([8544dc6](https://github.com/DemyCode/minecraft-copilot-ml/commit/8544dc637d4d9c074f3bc1f38ad1c862fccc28e8))
+* idontevenknow ([5acd526](https://github.com/DemyCode/minecraft-copilot-ml/commit/5acd5263cec6a72b3e5b30e151260390c69cb942))
+* making alignment only on branches ([1849708](https://github.com/DemyCode/minecraft-copilot-ml/commit/18497080a8b6eebac4ce3d09da0984663cb6028e))
+* making configure optimizers sane ([10ac68d](https://github.com/DemyCode/minecraft-copilot-ml/commit/10ac68da71deeeb8057f5f67e457f4e47000cce5))
+* new training ([de42b25](https://github.com/DemyCode/minecraft-copilot-ml/commit/de42b25332cbfe6d23f13ef2fb491b00ac1f017c))
+* putting scheduler back ([4e7558d](https://github.com/DemyCode/minecraft-copilot-ml/commit/4e7558dff4c30409aaedd357fcac8aa0681ba169))
+* reducing cpu count ([032935b](https://github.com/DemyCode/minecraft-copilot-ml/commit/032935bcbb7c03a73bf067f8f53fc5dfb5539a20))
+* removing remote ([01add5a](https://github.com/DemyCode/minecraft-copilot-ml/commit/01add5a57f17902f4b4b0a2db6d73b27896b23da))
+* removing the fail under for coverage ([50b9065](https://github.com/DemyCode/minecraft-copilot-ml/commit/50b90654da2cb577d85e6876c57cfe56ce5b1522))
+* setting baseline to kleine hutte dataset ([e2927a6](https://github.com/DemyCode/minecraft-copilot-ml/commit/e2927a669b231284b3bbfbfcc4442a5501bf442a))
+* switching to unet ([cf65e38](https://github.com/DemyCode/minecraft-copilot-ml/commit/cf65e387596c0c3eb76f512103cb0cde7dc090d4))
+* targeting correctly all branches ([982ad9f](https://github.com/DemyCode/minecraft-copilot-ml/commit/982ad9fbc55c9d7db3b7f74b98eefabe643b1385))
+* testing without scheduler ([7b9d084](https://github.com/DemyCode/minecraft-copilot-ml/commit/7b9d084a153df645177a95facfdfd40ea8b362bf))
+* updating lightning ([0f04f14](https://github.com/DemyCode/minecraft-copilot-ml/commit/0f04f1477bfd410a3032743ac6b18381515f3ba2))
+* using now poetry to do everything ([095db35](https://github.com/DemyCode/minecraft-copilot-ml/commit/095db356a26d5b9181d956dd55e75ef4ae335d6d))
+* using only header message ([d072c70](https://github.com/DemyCode/minecraft-copilot-ml/commit/d072c703253f5f7ebe46fd731224ba2627f53875))
+* using ref name ([e3b3a07](https://github.com/DemyCode/minecraft-copilot-ml/commit/e3b3a073279e064f0a73a82b77082628264e8a00))
+* working model shit performance ([0289e6a](https://github.com/DemyCode/minecraft-copilot-ml/commit/0289e6ad01c0d905c365d730bf1a7f3e5627f481))
+* working VAE ([babf9bd](https://github.com/DemyCode/minecraft-copilot-ml/commit/babf9bd568270f79b0a575df03d5e0435b0d41a1))
+* writing tests placehgolders ([381a055](https://github.com/DemyCode/minecraft-copilot-ml/commit/381a0554b8708358e8dde10984fc15650d44c006))
+
 ## [1.3.3](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.3.2...v1.3.3) (2024-02-03)
 
 
