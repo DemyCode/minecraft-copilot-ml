@@ -69,4 +69,3 @@ jobs:
           cname: coverage.example.com
           commit_message: "Deploy coverage report"
           destination_dir: ${{ github.event.number }}
-
