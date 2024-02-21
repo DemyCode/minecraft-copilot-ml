@@ -66,4 +66,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: htmlcov
           publish_branch: gh-pages
-          destination_dir: ${{ github.head_ref }}
+          destination_dir: ${{ github.head_ref || github.ref_name }}
