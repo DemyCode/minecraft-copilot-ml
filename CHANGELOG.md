@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.4.4...v1.5.0) (2024-02-22)
+
+
+### Features
+
+* pushing to github pages from workflow ([8960d12](https://github.com/DemyCode/minecraft-copilot-ml/commit/8960d1297255039598094d76c87aee453569d320))
+
+
+### Bug Fixes
+
+* action checkout with fetch depth 0 ([7fda2e9](https://github.com/DemyCode/minecraft-copilot-ml/commit/7fda2e97cf52e214d8d8acb79e34f50381d2feb0))
+* adding the commit config ([1b94ddf](https://github.com/DemyCode/minecraft-copilot-ml/commit/1b94ddf9c550a2038c1c6f4a13cf16e0b15434a1))
+* no changes to commit ([6602ffc](https://github.com/DemyCode/minecraft-copilot-ml/commit/6602ffc71d38db9dbb2c0726bf87c7f59c824d31))
+* pre commiting files ([8e013ca](https://github.com/DemyCode/minecraft-copilot-ml/commit/8e013ca18f0b7daeeb15e26310e542201bf5a07a))
+* remving the fail under coverage ([1eea014](https://github.com/DemyCode/minecraft-copilot-ml/commit/1eea0145d877d2a1c5115077a04ef8a91b0ed94f))
+* using force add ([2d9f3cc](https://github.com/DemyCode/minecraft-copilot-ml/commit/2d9f3cce2351291382d94c7407742dcd7dc091de))
+
 ## [1.4.4](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.4.3...v1.4.4) (2024-02-22)
 
 
