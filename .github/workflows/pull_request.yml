@@ -64,7 +64,7 @@ jobs:
       - run: git checkout gh-pages
       - run: git config --global user.email "verycols@gmail.com"
       - run: git config --global user.name "DemyCode"
-      - run: git add ${{ github.head_ref || github.ref_name }}
+      - run: git add -f ${{ github.head_ref || github.ref_name }}
       - run: git commit -m "Add coverage report for ${{ github.head_ref || github.ref_name }}"
       - run: git push origin gh-pages
 
