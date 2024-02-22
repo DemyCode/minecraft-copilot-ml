@@ -3,7 +3,7 @@ import gc
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 
 import litemapy  # type: ignore
 import nbtlib  # type: ignore
@@ -40,20 +40,22 @@ list_of_forbidden_files = [
     "19231.schematic",
     "13942.schematic",
     "4766.schematic",
+    "10380.schematic",
 ]
 
 
 def create_noisy_block_map(
     block_map: np.ndarray,
 ) -> np.ndarray:
-    random_percentage = np.random.random()
-    random_indices_from_focused_block_map = np.random.choice(
-        np.arange(block_map.size), replace=False, size=int(block_map.size * random_percentage)
-    )
-    unraveled_indices = np.unravel_index(random_indices_from_focused_block_map, block_map.shape)
-    returned_block_map = block_map.copy()
-    returned_block_map[unraveled_indices] = "minecraft:air"
-    return returned_block_map
+    x_start = np.random.randint(0, block_map.shape[0] - 1) if block_map.shape[0] > 1 else 0
+    y_start = np.random.randint(0, block_map.shape[1] - 1) if block_map.shape[1] > 1 else 0
+    z_start = np.random.randint(0, block_map.shape[2] - 1) if block_map.shape[2] > 1 else 0
+    x_end = np.random.randint(x_start + 1, block_map.shape[0]) if block_map.shape[0] > 1 else 1
+    y_end = np.random.randint(y_start + 1, block_map.shape[1]) if block_map.shape[1] > 1 else 1
+    z_end = np.random.randint(z_start + 1, block_map.shape[2]) if block_map.shape[2] > 1 else 1
+    result_block_map = block_map.copy()
+    result_block_map[x_start:x_end, y_start:y_end, z_start:z_end] = "minecraft:air"
+    return result_block_map
 
 
 def litematic_to_numpy_minecraft_map(
@@ -103,7 +105,8 @@ def nbt_to_numpy_minecraft_map(
             f"File {nbt_file} is forbidden. Skipping. If this file is here it is because it generates a SIGKILL."
         )
     from functools import partial
-    function_to_file = [
+
+    function_to_file: List[Callable[[str], np.ndarray]] = [
         litematic_to_numpy_minecraft_map,
         partial(schematic_to_numpy_minecraft_map, gzipped=True),
         partial(schematic_to_numpy_minecraft_map, gzipped=False),
@@ -128,6 +131,8 @@ def nbt_to_numpy_minecraft_map(
             logger.warning(f"Could not load {nbt_file} with {function}")
             final_exception = e
     logger.exception(final_exception)
+    raise Exception(f"Could not load {nbt_file}")
+
 
 def get_random_block_map_and_mask_coordinates(
     minecraft_map: np.ndarray,
@@ -148,16 +153,16 @@ def get_random_block_map_and_mask_coordinates(
     y_end = y_start + minimum_height
     z_end = z_start + minimum_depth
     random_roll_x_value = np.random.randint(0, sliding_window_width - minimum_width + 1)
-    random_y_height_value = np.random.randint(0, sliding_window_height - minimum_height + 1)
+    random_roll_y_value = np.random.randint(0, sliding_window_height - minimum_height + 1)
     random_roll_z_value = np.random.randint(0, sliding_window_depth - minimum_depth + 1)
     block_map[
         random_roll_x_value : random_roll_x_value + minimum_width,
-        random_y_height_value : random_y_height_value + minimum_height,
+        random_roll_y_value : random_roll_y_value + minimum_height,
         random_roll_z_value : random_roll_z_value + minimum_depth,
     ] = minecraft_map[x_start:x_end, y_start:y_end, z_start:z_end]
     return block_map, (
         random_roll_x_value,
-        random_y_height_value,
+        random_roll_y_value,
         random_roll_z_value,
         minimum_width,
         minimum_height,
@@ -176,7 +181,9 @@ def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
     return schematics_list_files
 
 
-def get_working_files_and_unique_blocks_and_counts(schematics_list_files: list[str]) -> None:
+def get_working_files_and_unique_blocks_and_counts(
+    schematics_list_files: list[str],
+) -> Tuple[Dict[str, int], np.ndarray, list[str]]:
     unique_blocks: Set[str] = set()
     unique_counts: Dict[str, int] = {}
     loaded_schematic_files: List[str] = []

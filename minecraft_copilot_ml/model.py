@@ -1,5 +1,5 @@
 # flake8: noqa: E203
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import lightning as pl
@@ -8,9 +8,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class VAE(pl.LightningModule):
-    def __init__(self, unique_blocks_dict, train_len_dataloader, unique_counts_coefficients=None, latent_dim=64):
-        super(VAE, self).__init__()
+class ConvBlock3d(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, padding: int = 1):
+        super(ConvBlock3d, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.bn = nn.BatchNorm3d(out_channels)
+        self.relu = nn.LeakyReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        result: torch.Tensor = self.relu(self.bn(self.conv(x)))
+        return result
+
+
+class UNet3d(pl.LightningModule):
+    def __init__(
+        self,
+        train_len_dataloader: int,
+        unique_blocks_dict: Dict[str, int],
+        latent_dim: int = 64,
+        unique_counts_coefficients: Optional[np.ndarray] = None,
+    ):
+        super(UNet3d, self).__init__()
         self.train_len_dataloader = train_len_dataloader
         self.unique_blocks_dict = unique_blocks_dict
         self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
@@ -20,107 +38,61 @@ class VAE(pl.LightningModule):
         self.unique_counts_coefficients = (
             torch.from_numpy(unique_counts_coefficients).float().to("cuda" if torch.cuda.is_available() else "cpu")
         )
+        self.conv_input = ConvBlock3d(1, 32)
+        self.conv1 = ConvBlock3d(32, 64)
+        self.conv2 = ConvBlock3d(64, 128)
+        self.conv3 = ConvBlock3d(128, 256)
+        self.conv4 = ConvBlock3d(256, 512)
 
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Conv3d(1, len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            # lets go
-            nn.Flatten(),
-            nn.Linear(len(unique_blocks_dict) * 16 * 16 * 16, 2 * latent_dim),
-            nn.LeakyReLU(),
-            nn.Linear(2 * latent_dim, 2 * latent_dim),  # 2 * latent_dim for mean and variance
-        )
-
-        # Decoder
-        self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, 2 * latent_dim),
-            nn.LeakyReLU(),
-            nn.Linear(2 * latent_dim, len(unique_blocks_dict) * 16 * 16 * 16),
-            nn.LeakyReLU(),
-            nn.Unflatten(1, (len(unique_blocks_dict), 16, 16, 16)),
-            # lets go
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-            nn.BatchNorm3d(len(unique_blocks_dict)),
-            nn.LeakyReLU(),
-            nn.Conv3d(len(unique_blocks_dict), len(unique_blocks_dict), kernel_size=3, padding=1),
-        )
-
-    def reparameterize(self, mean, log_var):
-        std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        return mean + eps * std
+        self.conv6 = ConvBlock3d(512, 256)
+        self.conv7 = ConvBlock3d(256, 128)
+        self.conv8 = ConvBlock3d(128, 64)
+        self.conv9 = ConvBlock3d(64, 32)
+        self.conv_output = nn.Conv3d(32, len(unique_blocks_dict), kernel_size=3, padding=1)
 
     def ml_core(self, x: torch.Tensor) -> torch.Tensor:
         # Encode input
-        mean_variance = self.encoder(x)
-        mean = mean_variance[:, : self.latent_dim]
-        log_variance = mean_variance[:, self.latent_dim :]
+        out_conv_input = self.conv_input(x)
+        out_conv_1 = self.conv1(out_conv_input)
+        out_conv_2 = self.conv2(out_conv_1)
+        out_conv_3 = self.conv3(out_conv_2)
+        out_conv_4 = self.conv4(out_conv_3)
 
-        # Reparameterization trick
-        z = self.reparameterize(mean, log_variance)
+        # Decode input
+        out_conv_6 = self.conv6(out_conv_4) + out_conv_3
+        out_conv_7 = self.conv7(out_conv_6) + out_conv_2
+        out_conv_8 = self.conv8(out_conv_7) + out_conv_1
+        out_conv_9 = self.conv9(out_conv_8) + out_conv_input
+        out_conv_output: torch.Tensor = self.conv_output(out_conv_9)
+        return out_conv_output
 
-        # Decode
-        reconstruction = self.decoder(z)
-        return reconstruction, mean, log_variance
-
-    def forward(self, x: torch.Tensor):
-        reconstruction, mean, log_variance = self.ml_core(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        reconstruction = self.ml_core(x)
         reconstruction = F.softmax(reconstruction, dim=1)
-        return reconstruction, mean, log_variance
+        return reconstruction
 
-    def step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int, mode: str) -> torch.Tensor:
+    def step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int, mode: str) -> torch.Tensor:
         block_maps, noisy_block_maps, masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
         pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps).float().unsqueeze(1)
-        masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
-        reconstruction, mean, log_var = self.ml_core(pre_processed_noisy_block_maps)
+        tensor_masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
+        reconstruction = self.ml_core(pre_processed_noisy_block_maps)
 
         # Compute accuracy
         accuracy = (reconstruction.argmax(dim=1) == pre_processed_block_maps).float()
-        accuracy = accuracy * masks
+        accuracy = accuracy * tensor_masks
         accuracy = accuracy.mean()
 
         # Compute reconstruction loss using categorical cross-entropy
         reconstruction_loss = F.cross_entropy(reconstruction, pre_processed_block_maps, reduction="none")
-        reconstruction_loss = reconstruction_loss * masks
+        reconstruction_loss = reconstruction_loss * tensor_masks
         reconstruction_loss = reconstruction_loss * self.unique_counts_coefficients[pre_processed_block_maps]
         reconstruction_loss = reconstruction_loss.mean()
 
-        # Compute KL divergence
-        kl_divergence = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
-
         # Total loss
-        loss = reconstruction_loss + kl_divergence
+        loss = reconstruction_loss
         loss_dict = {
             "reconstruction_loss": reconstruction_loss,
-            "kl_divergence": kl_divergence,
             "loss": loss,
             "accuracy": accuracy,
             "learning_rate": self.trainer.optimizers[0].param_groups[0]["lr"],
@@ -150,17 +122,15 @@ class VAE(pl.LightningModule):
         predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
         return predicted_block_maps
 
-    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int) -> torch.Tensor:
         return self.step(batch, batch_idx, "train")
 
-    def validation_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int) -> torch.Tensor:
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, max_lr=1e-3, total_steps=self.trainer.estimated_stepping_batches
-        )
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1e-3, total_steps=self.train_len_dataloader)
         return [optimizer], [scheduler]
 
     def on_train_start(self) -> None:
