@@ -1,5 +1,7 @@
 [![Main pipeline](https://github.com/DemyCode/minecraft-copilot-ml/actions/workflows/master.yml/badge.svg?branch=master)](https://github.com/DemyCode/minecraft-copilot-ml/actions/workflows/master.yml)
 
+https://demycode.github.io/minecraft-copilot-ml/master/
+
 # Minecraft Copilot ML
 
 This repository is the Machine Learning / Data Science part of the minecraft-copilot mod.
