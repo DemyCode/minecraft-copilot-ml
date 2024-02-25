@@ -24,7 +24,7 @@ repos:
     hooks:
       - id: setup
         name: setup
-        entry: poetry install
+        entry: poetry install --dry-run
         language: system
         types: [python]
         pass_filenames: false
