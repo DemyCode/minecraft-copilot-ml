@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.5.0...v1.6.0) (2024-02-25)
+
+
+### Features
+
+* moving the Minecraft Schematics Datasets into the data loader file ([9e1c44f](https://github.com/DemyCode/minecraft-copilot-ml/commit/9e1c44f4209394a97da42405435c1d0496968d3a))
+* using updated alignment ([821fdf4](https://github.com/DemyCode/minecraft-copilot-ml/commit/821fdf43a816ab8bf57ffbb75aa43df98d19f918))
+
 ## [1.5.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.4.4...v1.5.0) (2024-02-22)
 
 
