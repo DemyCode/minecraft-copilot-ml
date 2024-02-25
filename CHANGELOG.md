@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.1](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.6.0...v1.6.1) (2024-02-25)
+
+
+### Bug Fixes
+
+* making poetry install dry run ([bcfa100](https://github.com/DemyCode/minecraft-copilot-ml/commit/bcfa100fe174e310f18d8350636857f584a94b51))
+
 ## [1.6.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.5.0...v1.6.0) (2024-02-25)
 
 
