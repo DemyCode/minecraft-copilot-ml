@@ -2,11 +2,12 @@
 import gc
 import re
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, List, Tuple
 
 import nbtlib  # type: ignore
 import numpy as np
 from loguru import logger
+from torch.utils.data import Dataset
 
 from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
 
@@ -33,7 +34,7 @@ list_of_forbidden_files = [
     "452.schematic",
     "1924.schematic",
     "785.schematic",
-    "4178.schematic"
+    "4178.schematic",
 ]
 
 
@@ -111,3 +112,47 @@ def get_random_block_map_and_mask_coordinates(
         minimum_height,
         minimum_depth,
     )
+
+
+class MinecraftSchematicsDataset(Dataset):
+    def __init__(
+        self,
+        schematics_list_files: List[str],
+        unique_blocks_dict: Dict[str, int],
+    ) -> None:
+        self.schematics_list_files = schematics_list_files
+        self.unique_blocks_dict = unique_blocks_dict
+
+    def __len__(self) -> int:
+        return len(self.schematics_list_files)
+
+    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        nbt_file = self.schematics_list_files[idx]
+        numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+        block_map, (
+            random_roll_x_value,
+            random_y_height_value,
+            random_roll_z_value,
+            minimum_width,
+            minimum_height,
+            minimum_depth,
+        ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
+        focused_block_map = block_map[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ]
+        noisy_focused_block_map = create_noisy_block_map(focused_block_map)
+        noisy_block_map = block_map.copy()
+        noisy_block_map[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = noisy_focused_block_map
+        mask = np.zeros((16, 16, 16), dtype=bool)
+        mask[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = True
+        return block_map, noisy_block_map, mask

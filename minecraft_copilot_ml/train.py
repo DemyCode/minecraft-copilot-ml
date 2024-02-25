@@ -2,7 +2,7 @@
 import argparse
 import json
 import os
-from typing import Dict, List, Set, Tuple
+from typing import List, Set, Tuple
 
 import boto3
 import numpy as np
@@ -12,59 +12,10 @@ from loguru import logger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from sklearn.model_selection import train_test_split  # type: ignore
-from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from minecraft_copilot_ml.data_loader import (
-    create_noisy_block_map,
-    get_random_block_map_and_mask_coordinates,
-    nbt_to_numpy_minecraft_map,
-)
+from minecraft_copilot_ml.data_loader import MinecraftSchematicsDataset, nbt_to_numpy_minecraft_map
 from minecraft_copilot_ml.model import UNet3D
-
-
-class MinecraftSchematicsDataset(Dataset):
-    def __init__(
-        self,
-        schematics_list_files: List[str],
-        unique_blocks_dict: Dict[str, int],
-    ) -> None:
-        self.schematics_list_files = schematics_list_files
-        self.unique_blocks_dict = unique_blocks_dict
-
-    def __len__(self) -> int:
-        return len(self.schematics_list_files)
-
-    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        nbt_file = self.schematics_list_files[idx]
-        numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
-        block_map, (
-            random_roll_x_value,
-            random_y_height_value,
-            random_roll_z_value,
-            minimum_width,
-            minimum_height,
-            minimum_depth,
-        ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
-        focused_block_map = block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ]
-        noisy_focused_block_map = create_noisy_block_map(focused_block_map)
-        noisy_block_map = block_map.copy()
-        noisy_block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = noisy_focused_block_map
-        mask = np.zeros((16, 16, 16), dtype=bool)
-        mask[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = True
-        return block_map, noisy_block_map, mask
 
 
 def export_to_onnx(model: UNet3D, path_to_output: str) -> None:
