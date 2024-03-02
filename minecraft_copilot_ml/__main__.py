@@ -75,7 +75,11 @@ def main(argparser: argparse.ArgumentParser) -> None:
         val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn
     )
 
-    model = UNet3d(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
+    model = UNet3d(
+        unique_blocks_dict,
+        unique_counts_coefficients=unique_counts_coefficients,
+        train_len_dataloader=len(train_schematics_dataloader),
+    )
     csv_logger = CSVLogger(save_dir=path_to_output)
     model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1, save_last=True, mode="min")
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs, log_every_n_steps=1)
@@ -86,12 +90,14 @@ def main(argparser: argparse.ArgumentParser) -> None:
     best_model = UNet3d.load_from_checkpoint(
         model_checkpoint.best_model_path,
         unique_blocks_dict=unique_blocks_dict,
+        train_len_dataloader=len(train_schematics_dataloader),
         unique_counts_coefficients=unique_counts_coefficients,
     )
     torch.save(best_model, os.path.join(path_to_output, "best_model.pth"))
     last_model = UNet3d.load_from_checkpoint(
         model_checkpoint.last_model_path,
         unique_blocks_dict=unique_blocks_dict,
+        train_len_dataloader=len(train_schematics_dataloader),
         unique_counts_coefficients=unique_counts_coefficients,
     )
     torch.save(last_model, os.path.join(path_to_output, "last_model.pth"))

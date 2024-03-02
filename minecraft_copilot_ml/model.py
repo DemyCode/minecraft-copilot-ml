@@ -2,7 +2,7 @@
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,11 +23,13 @@ class ConvBlock3d(nn.Module):
 class UNet3d(pl.LightningModule):
     def __init__(
         self,
+        train_len_dataloader: int,
         unique_blocks_dict: Dict[str, int],
-        unique_counts_coefficients: Optional[np.ndarray] = None,
         latent_dim: int = 64,
+        unique_counts_coefficients: Optional[np.ndarray] = None,
     ):
         super(UNet3d, self).__init__()
+        self.train_len_dataloader = train_len_dataloader
         self.unique_blocks_dict = unique_blocks_dict
         self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
         self.latent_dim = latent_dim
@@ -127,7 +129,9 @@ class UNet3d(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1e-3, total_steps=self.train_len_dataloader)
+        return [optimizer], [scheduler]
 
     def on_train_start(self) -> None:
         print(self)
