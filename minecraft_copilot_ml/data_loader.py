@@ -47,7 +47,7 @@ list_of_forbidden_files = [
 
 def create_noisy_block_map(
     block_map: np.ndarray,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, Tuple[int, int, int, int, int, int]]:
     x_start = np.random.randint(0, block_map.shape[0] - 1) if block_map.shape[0] > 1 else 0
     y_start = np.random.randint(0, block_map.shape[1] - 1) if block_map.shape[1] > 1 else 0
     z_start = np.random.randint(0, block_map.shape[2] - 1) if block_map.shape[2] > 1 else 0
@@ -56,7 +56,14 @@ def create_noisy_block_map(
     z_end = np.random.randint(z_start + 1, block_map.shape[2]) if block_map.shape[2] > 1 else 1
     result_block_map = block_map.copy()
     result_block_map[x_start:x_end, y_start:y_end, z_start:z_end] = "minecraft:air"
-    return result_block_map
+    return result_block_map, (
+        x_start,
+        y_start,
+        z_start,
+        x_end - x_start,
+        y_end - y_start,
+        z_end - z_start,
+    )
 
 
 def litematic_to_numpy_minecraft_map(
@@ -181,7 +188,7 @@ class MinecraftSchematicsDataset(Dataset):
     def __len__(self) -> int:
         return len(self.schematics_list_files)
 
-    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         nbt_file = self.schematics_list_files[idx]
         numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
         block_map, (
@@ -197,20 +204,33 @@ class MinecraftSchematicsDataset(Dataset):
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ]
-        noisy_focused_block_map = create_noisy_block_map(focused_block_map)
+        result_block_map, (
+            noisy_x_start,
+            noisy_y_start,
+            noisy_z_start,
+            noisy_x_width,
+            noisy_y_height,
+            noisy_z_depth,
+        ) = create_noisy_block_map(focused_block_map)
         noisy_block_map = block_map.copy()
         noisy_block_map[
             random_roll_x_value : random_roll_x_value + minimum_width,
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = noisy_focused_block_map
+        ] = result_block_map
         mask = np.zeros((16, 16, 16), dtype=bool)
         mask[
             random_roll_x_value : random_roll_x_value + minimum_width,
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
-        return block_map, noisy_block_map, mask
+        loss_mask = np.zeros((16, 16, 16), dtype=bool)
+        loss_mask[
+            random_roll_x_value + noisy_x_start : random_roll_x_value + noisy_x_start + noisy_x_width,
+            random_y_height_value + noisy_y_start : random_y_height_value + noisy_y_start + noisy_y_height,
+            random_roll_z_value + noisy_z_start : random_roll_z_value + noisy_z_start + noisy_z_depth,
+        ] = True
+        return block_map, noisy_block_map, mask, loss_mask
 
 
 def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:

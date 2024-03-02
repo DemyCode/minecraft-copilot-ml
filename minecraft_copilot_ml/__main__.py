@@ -18,7 +18,6 @@ from minecraft_copilot_ml.data_loader import (
     MinecraftSchematicsDataset,
     get_working_files_and_unique_blocks_and_counts,
     list_schematic_files_in_folder,
-    nbt_to_numpy_minecraft_map,
 )
 from minecraft_copilot_ml.model import UNet3d
 

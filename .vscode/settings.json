@@ -4,10 +4,10 @@
     "python.formatting.provider": "black",
     "mypy-type-checker.args": [
         "--config-file",
-        "./pyproject.toml"
+        "pyproject.toml"
     ],
     "mypy-type-checker.importStrategy": "fromEnvironment",
-    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.typeCheckingMode": "basic",
     "python.analysis.inlayHints.callArgumentNames": false,
     "python.analysis.inlayHints.functionReturnTypes": false,
     "python.analysis.inlayHints.pytestParameters": false,
