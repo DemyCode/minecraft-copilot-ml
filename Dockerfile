@@ -13,4 +13,4 @@ COPY . /app/
 COPY minecraft_copilot_ml/ /app/minecraft_copilot_ml/
 RUN poetry install --only main --no-interaction --no-ansi
 
-ENTRYPOINT ["poetry", "run", "python", "minecraft_copilot_ml/train.py"]
+ENTRYPOINT ["poetry", "run", "python", "minecraft_copilot_ml"]
