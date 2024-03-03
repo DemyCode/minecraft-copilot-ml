@@ -3,7 +3,7 @@ import argparse
 import json
 import os
 from typing import List, Optional, Set, Tuple
-
+from torch.utils.data import DataLoader
 import boto3
 import numpy as np
 import pytorch_lightning as pl
@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 from minecraft_copilot_ml.data_loader import (
     MinecraftSchematicsDataset,
+    MinecraftSchematicsDatasetItemType,
     get_working_files_and_unique_blocks_and_counts,
     list_schematic_files_in_folder,
 )
@@ -29,6 +30,7 @@ def export_to_onnx(model: UNet3d, path_to_output: str) -> None:
         path_to_output,
         input_names=["input"],
         output_names=["output"],
+        opset_version=19,
     )
 
 
@@ -63,14 +65,14 @@ def main(argparser: argparse.ArgumentParser) -> None:
     train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files)
     val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files)
 
-    def collate_fn(batch: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        block_map, noisy_block_map, mask = zip(*batch)
-        return np.stack(block_map), np.stack(noisy_block_map), np.stack(mask)
+    def collate_fn(batch: List[MinecraftSchematicsDatasetItemType]) -> MinecraftSchematicsDatasetItemType:
+        block_map, noisy_block_map, mask, loss_mask = zip(*batch)
+        return np.stack(block_map), np.stack(noisy_block_map), np.stack(mask), np.stack(loss_mask)
 
-    train_schematics_dataloader = torch.utils.data.DataLoader(
+    train_schematics_dataloader = DataLoader(
         train_schematics_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
-    val_schematics_dataloader = torch.utils.data.DataLoader(
+    val_schematics_dataloader = DataLoader(
         val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn
     )
 

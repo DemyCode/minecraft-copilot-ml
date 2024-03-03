@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from minecraft_copilot_ml.data_loader import MinecraftSchematicsDatasetItemType
+
 
 class ConvBlock3d(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, padding: int = 1):
@@ -70,7 +72,7 @@ class UNet3d(pl.LightningModule):
         return reconstruction
 
     def step(
-        self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], batch_idx: int, mode: str
+        self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int, mode: str
     ) -> torch.Tensor:
         block_maps, noisy_block_maps, masks, loss_masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
@@ -124,10 +126,10 @@ class UNet3d(pl.LightningModule):
         predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
         return predicted_block_maps
 
-    def training_step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> torch.Tensor:
         return self.step(batch, batch_idx, "train")
 
-    def validation_step(self, batch: Tuple[np.ndarray, np.ndarray, np.ndarray], batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> torch.Tensor:
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:

@@ -177,6 +177,7 @@ def get_random_block_map_and_mask_coordinates(
         minimum_depth,
     )
 
+MinecraftSchematicsDatasetItemType = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 class MinecraftSchematicsDataset(Dataset):
     def __init__(
@@ -188,7 +189,7 @@ class MinecraftSchematicsDataset(Dataset):
     def __len__(self) -> int:
         return len(self.schematics_list_files)
 
-    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def __getitem__(self, idx: int) -> MinecraftSchematicsDatasetItemType:
         nbt_file = self.schematics_list_files[idx]
         numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
         block_map, (
@@ -224,12 +225,12 @@ class MinecraftSchematicsDataset(Dataset):
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
-        loss_mask = np.zeros((16, 16, 16), dtype=bool)
+        loss_mask = np.ones((16, 16, 16), dtype=int)
         loss_mask[
             random_roll_x_value + noisy_x_start : random_roll_x_value + noisy_x_start + noisy_x_width,
             random_y_height_value + noisy_y_start : random_y_height_value + noisy_y_start + noisy_y_height,
             random_roll_z_value + noisy_z_start : random_roll_z_value + noisy_z_start + noisy_z_depth,
-        ] = True
+        ] = 2
         return block_map, noisy_block_map, mask, loss_mask
 
 
