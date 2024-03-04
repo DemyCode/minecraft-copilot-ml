@@ -82,9 +82,9 @@ class UNet3d(pl.LightningModule):
         reconstruction = self.ml_core(pre_processed_noisy_block_maps)
 
         # Compute accuracy
-        accuracy = (reconstruction.argmax(dim=1) == pre_processed_block_maps).float()
-        accuracy = accuracy * tensor_masks
-        accuracy = accuracy.mean()
+        accuracy_truth_map = (reconstruction.argmax(dim=1) == pre_processed_block_maps).float()
+        accuracy_on_whole = (accuracy_truth_map * tensor_masks).mean()
+        accuracy_on_loss = (accuracy_truth_map * tensor_masks * tensor_loss_masks).mean()
 
         # Compute reconstruction loss using categorical cross-entropy
         reconstruction_loss = F.cross_entropy(reconstruction, pre_processed_block_maps, reduction="none")
@@ -98,7 +98,8 @@ class UNet3d(pl.LightningModule):
         loss_dict = {
             "reconstruction_loss": reconstruction_loss,
             "loss": loss,
-            "accuracy": accuracy,
+            "accuracy_on_whole": accuracy_on_whole,
+            "accuracy_on_loss": accuracy_on_loss,
             "learning_rate": self.trainer.optimizers[0].param_groups[0]["lr"],
         }
         for name, value in loss_dict.items():
