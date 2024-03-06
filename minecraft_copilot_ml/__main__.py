@@ -30,7 +30,8 @@ def export_to_onnx(model: UNet3d, path_to_output: str) -> None:
         path_to_output,
         input_names=["input"],
         output_names=["output"],
-        opset_version=19,
+        # https://onnxruntime.ai/docs/reference/compatibility.html
+        opset_version=17,
     )
 
 
