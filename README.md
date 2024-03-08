@@ -6,7 +6,7 @@ https://demycode.github.io/minecraft-copilot-ml/master/
 
 This repository is the Machine Learning / Data Science part of the minecraft-copilot mod.
 The goal of this repository is to research the optimal Machine Learning model for the minecraft copilot.
-Once found the main pipeline will train the model and register the artifact in MLFlow registry for later use.
+
 ### Usefull Links :
 
 - [MLFlow Registry](google.com): Register your model metrics and artifacts on this registry
