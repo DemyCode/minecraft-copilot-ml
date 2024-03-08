@@ -31,4 +31,4 @@ jobs:
           token: ${{ secrets.PAT }}
           repository: ${{ github.repository_owner }}/minecraft-copilot
           event-type: alignment
-          client-payload: '{"branch": "${{ github.ref_name }}", "repository": "${{ github.event.repository.name }}", "message": "${{ steps.commit-message.outputs.header }}"}'
+          client-payload: '{"branch": "${{ github.ref_name }}", "repository": "${{ github.event.repository.name }}", "message": "${{ steps.commit-message.outputs.header }}", "sha": "${{ github.sha }}"}'
