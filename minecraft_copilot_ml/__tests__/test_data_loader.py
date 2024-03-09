@@ -27,7 +27,14 @@ def test_create_noisy_block_map() -> None:
         ],
         dtype=object,
     )
-    noisy_block_map = create_noisy_block_map(block_map)
+    noisy_block_map, (
+        x_coordinates,
+        y_coordinates,
+        z_coordinates,
+        x_width,
+        y_width,
+        z_width,
+    ) = create_noisy_block_map(block_map)
     assert noisy_block_map.shape == block_map.shape
     assert noisy_block_map.dtype == block_map.dtype
     assert (noisy_block_map != block_map).any()
