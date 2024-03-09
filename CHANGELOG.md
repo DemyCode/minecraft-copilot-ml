@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.0.0](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.6.2...v2.0.0) (2024-03-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* WE THE BEST TRAINING
+
+### Features
+
+* WE THE BEST TRAINING ([8a39447](https://github.com/DemyCode/minecraft-copilot-ml/commit/8a39447df3e3e56ae7944f8ed16353e4a9ac2290))
+
+
+### Bug Fixes
+
+* adding accuracy on loss tensor mask ([9070f07](https://github.com/DemyCode/minecraft-copilot-ml/commit/9070f071a8ce8c55f7beb678b53eb8c7c80b7e4d))
+* adding the loss mask to the loss computation ([71948cf](https://github.com/DemyCode/minecraft-copilot-ml/commit/71948cf0255d716d72d6abeb39f64aac50d9f472))
+* black ([770e37e](https://github.com/DemyCode/minecraft-copilot-ml/commit/770e37e5996c0b3da96953d62284a37a3cbee53c))
+* changing test because signature is incorrect ([ec82e49](https://github.com/DemyCode/minecraft-copilot-ml/commit/ec82e495539e0f4f88a9dfa22dfdce7434be2312))
+* MORE ([6e685dd](https://github.com/DemyCode/minecraft-copilot-ml/commit/6e685dd80afd325dd47de130e982487133435d16))
+* removing ml flow part in README ([ab11892](https://github.com/DemyCode/minecraft-copilot-ml/commit/ab11892dbafcbc203656f6d2618666e27b264fcc))
+* removing useless file in DockerFile ([6b7fb3d](https://github.com/DemyCode/minecraft-copilot-ml/commit/6b7fb3d0d5146f92d25b0729d8c918b490eea89c))
+* removing useless file in DockerFile ([6559fb8](https://github.com/DemyCode/minecraft-copilot-ml/commit/6559fb82991099ebaf957415a7f4cdb5e9a0fc71))
+* stop sending github sha ([64a2374](https://github.com/DemyCode/minecraft-copilot-ml/commit/64a2374bfbb1611ac0ea16e9d480bc13970e0120))
+* using sha to make updates ([d79954f](https://github.com/DemyCode/minecraft-copilot-ml/commit/d79954f6ca583c2b78b52c6d8379b3e56a788fbb))
+
 ## [1.6.2](https://github.com/DemyCode/minecraft-copilot-ml/compare/v1.6.1...v1.6.2) (2024-03-02)
 
 
