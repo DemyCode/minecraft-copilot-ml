@@ -3,7 +3,7 @@ import argparse
 import json
 import os
 from typing import List, Optional, Set, Tuple
-from torch.utils.data import DataLoader
+
 import boto3
 import numpy as np
 import pytorch_lightning as pl
@@ -12,6 +12,7 @@ from loguru import logger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from sklearn.model_selection import train_test_split  # type: ignore
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from minecraft_copilot_ml.data_loader import (
@@ -73,9 +74,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
     train_schematics_dataloader = DataLoader(
         train_schematics_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
-    val_schematics_dataloader = DataLoader(
-        val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn
-    )
+    val_schematics_dataloader = DataLoader(val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn)
 
     model = UNet3d(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
     csv_logger = CSVLogger(save_dir=path_to_output)

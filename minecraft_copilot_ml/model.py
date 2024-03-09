@@ -71,14 +71,14 @@ class UNet3d(pl.LightningModule):
         reconstruction = F.softmax(reconstruction, dim=1)
         return reconstruction
 
-    def step(
-        self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int, mode: str
-    ) -> torch.Tensor:
+    def step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int, mode: str) -> torch.Tensor:
         block_maps, noisy_block_maps, masks, loss_masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
         pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps).float().unsqueeze(1)
         tensor_masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
-        tensor_loss_masks = torch.from_numpy(loss_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
+        tensor_loss_masks = (
+            torch.from_numpy(loss_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
+        )
         reconstruction = self.ml_core(pre_processed_noisy_block_maps)
 
         # Compute accuracy

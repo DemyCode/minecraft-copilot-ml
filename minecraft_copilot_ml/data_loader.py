@@ -177,7 +177,9 @@ def get_random_block_map_and_mask_coordinates(
         minimum_depth,
     )
 
+
 MinecraftSchematicsDatasetItemType = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+
 
 class MinecraftSchematicsDataset(Dataset):
     def __init__(
