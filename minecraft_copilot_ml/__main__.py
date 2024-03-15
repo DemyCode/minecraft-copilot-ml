@@ -42,14 +42,20 @@ def main(argparser: argparse.ArgumentParser) -> None:
     epochs: int = argparser.parse_args().epochs
     batch_size: int = argparser.parse_args().batch_size
     dataset_limit: Optional[int] = argparser.parse_args().dataset_limit
+    dataset_start: Optional[int] = argparser.parse_args().dataset_start
 
     if not os.path.exists(path_to_output):
         os.makedirs(path_to_output)
 
     schematics_list_files = list_schematic_files_in_folder(path_to_schematics)
     schematics_list_files = sorted(schematics_list_files)
+    start = 0
+    end = len(schematics_list_files)
+    if dataset_start is not None:
+        start = dataset_start
     if dataset_limit is not None:
-        schematics_list_files = schematics_list_files[:dataset_limit]
+        end = dataset_limit
+    schematics_list_files = schematics_list_files[start:end]
     # Set the dictionary size to the number of unique blocks in the dataset.
     # And also select the right files to load.
     unique_blocks_dict, unique_counts_coefficients, loaded_schematic_files = (
@@ -128,5 +134,6 @@ if __name__ == "__main__":
     argparser.add_argument("--epochs", type=int, required=True)
     argparser.add_argument("--batch-size", type=int, required=True)
     argparser.add_argument("--dataset-limit", type=int)
+    argparser.add_argument("--dataset-start", type=int)
 
     main(argparser)
