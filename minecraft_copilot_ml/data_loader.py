@@ -207,15 +207,15 @@ class MinecraftSchematicsDataset(Dataset):
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = focused_noisy_block_map
-        mask = np.zeros((16, 16, 16), dtype=bool)
-        mask[
+        block_map_mask = np.zeros((16, 16, 16), dtype=bool)
+        block_map_mask[
             random_roll_x_value : random_roll_x_value + minimum_width,
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
-        loss_mask = np.ones((16, 16, 16), dtype=int)
-        loss_mask[unraveled_indices_of_noise] = 2
-        return block_map, noisy_block_map, mask, loss_mask
+        loss_mask = np.zeros((16, 16, 16), dtype=bool)
+        loss_mask[unraveled_indices_of_noise] = True
+        return block_map, noisy_block_map, block_map_mask, loss_mask
 
 
 def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:

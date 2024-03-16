@@ -72,10 +72,10 @@ class UNet3d(pl.LightningModule):
         return reconstruction
 
     def step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int, mode: str) -> torch.Tensor:
-        block_maps, noisy_block_maps, masks, loss_masks = batch
+        block_maps, noisy_block_maps, block_map_masks, loss_masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
         pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps).float().unsqueeze(1)
-        tensor_masks = torch.from_numpy(masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
+        tensor_block_map_masks = torch.from_numpy(block_map_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
         tensor_loss_masks = (
             torch.from_numpy(loss_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
         )
@@ -83,23 +83,22 @@ class UNet3d(pl.LightningModule):
 
         # Compute accuracy
         accuracy_truth_map = (reconstruction.argmax(dim=1) == pre_processed_block_maps).float()
-        accuracy_on_whole = (accuracy_truth_map * tensor_masks).mean()
-        accuracy_on_loss = (accuracy_truth_map * tensor_masks * tensor_loss_masks).mean()
+        accuracy_on_block_map = accuracy_truth_map[tensor_block_map_masks.bool()].mean()
+        accuracy_on_loss_map = accuracy_truth_map[tensor_loss_masks.bool()].mean()
 
         # Compute reconstruction loss using categorical cross-entropy
+        loss_masks_coefficients = torch.where(tensor_loss_masks == 0, 1, 2).float().to("cuda" if torch.cuda.is_available() else "cpu")
         reconstruction_loss = F.cross_entropy(reconstruction, pre_processed_block_maps, reduction="none")
-        reconstruction_loss = reconstruction_loss * tensor_masks
-        reconstruction_loss = reconstruction_loss * tensor_loss_masks
+        reconstruction_loss = reconstruction_loss * tensor_block_map_masks
+        reconstruction_loss = reconstruction_loss * loss_masks_coefficients
         reconstruction_loss = reconstruction_loss * self.unique_counts_coefficients[pre_processed_block_maps]
-        reconstruction_loss = reconstruction_loss.mean()
+        loss = reconstruction_loss.mean()
 
         # Total loss
-        loss = reconstruction_loss
         loss_dict = {
-            "reconstruction_loss": reconstruction_loss,
             "loss": loss,
-            "accuracy_on_whole": accuracy_on_whole,
-            "accuracy_on_loss": accuracy_on_loss,
+            "accuracy_on_block_map": accuracy_on_block_map,
+            "accuracy_on_loss_map": accuracy_on_loss_map,
             "learning_rate": self.trainer.optimizers[0].param_groups[0]["lr"],
         }
         for name, value in loss_dict.items():
