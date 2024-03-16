@@ -9,6 +9,7 @@ import litemapy  # type: ignore
 import nbtlib  # type: ignore
 import numpy as np
 from loguru import logger
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from minecraft_copilot_ml.minecraft_pre_flattening_id import default_palette
@@ -41,6 +42,7 @@ list_of_forbidden_files = [
     "13942.schematic",
     "4766.schematic",
     "10380.schematic",
+    "12695.schematic",
 ]
 
 
@@ -167,6 +169,64 @@ def get_random_block_map_and_mask_coordinates(
         minimum_height,
         minimum_depth,
     )
+
+
+MinecraftSchematicsDatasetItemType = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+
+
+class MinecraftSchematicsDataset(Dataset):
+    def __init__(
+        self,
+        schematics_list_files: List[str],
+    ) -> None:
+        self.schematics_list_files = schematics_list_files
+
+    def __len__(self) -> int:
+        return len(self.schematics_list_files)
+
+    def __getitem__(self, idx: int) -> MinecraftSchematicsDatasetItemType:
+        nbt_file = self.schematics_list_files[idx]
+        numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
+        block_map, (
+            random_roll_x_value,
+            random_y_height_value,
+            random_roll_z_value,
+            minimum_width,
+            minimum_height,
+            minimum_depth,
+        ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
+        focused_block_map = block_map[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ]
+        result_block_map, (
+            noisy_x_start,
+            noisy_y_start,
+            noisy_z_start,
+            noisy_x_width,
+            noisy_y_height,
+            noisy_z_depth,
+        ) = create_noisy_block_map(focused_block_map)
+        noisy_block_map = block_map.copy()
+        noisy_block_map[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = result_block_map
+        mask = np.zeros((16, 16, 16), dtype=bool)
+        mask[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_y_height_value : random_y_height_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = True
+        loss_mask = np.ones((16, 16, 16), dtype=int)
+        loss_mask[
+            random_roll_x_value + noisy_x_start : random_roll_x_value + noisy_x_start + noisy_x_width,
+            random_y_height_value + noisy_y_start : random_y_height_value + noisy_y_start + noisy_y_height,
+            random_roll_z_value + noisy_z_start : random_roll_z_value + noisy_z_start + noisy_z_depth,
+        ] = 2
+        return block_map, noisy_block_map, mask, loss_mask
 
 
 def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:

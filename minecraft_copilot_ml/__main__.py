@@ -2,7 +2,7 @@
 import argparse
 import json
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import boto3
 import numpy as np
@@ -12,58 +12,16 @@ from loguru import logger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from sklearn.model_selection import train_test_split  # type: ignore
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from minecraft_copilot_ml.data_loader import (
-    create_noisy_block_map,
-    get_random_block_map_and_mask_coordinates,
+    MinecraftSchematicsDataset,
+    MinecraftSchematicsDatasetItemType,
     get_working_files_and_unique_blocks_and_counts,
     list_schematic_files_in_folder,
-    nbt_to_numpy_minecraft_map,
 )
 from minecraft_copilot_ml.model import UNet3d
-
-
-class MinecraftSchematicsDataset(Dataset):
-    def __init__(
-        self,
-        schematics_list_files: List[str],
-    ) -> None:
-        self.schematics_list_files = schematics_list_files
-
-    def __len__(self) -> int:
-        return len(self.schematics_list_files)
-
-    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        nbt_file = self.schematics_list_files[idx]
-        numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
-        block_map, (
-            random_roll_x_value,
-            random_roll_y_value,
-            random_roll_z_value,
-            minimum_width,
-            minimum_height,
-            minimum_depth,
-        ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
-        focused_block_map = block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_roll_y_value : random_roll_y_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ]
-        noisy_focused_block_map = create_noisy_block_map(focused_block_map)
-        noisy_block_map = block_map.copy()
-        noisy_block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_roll_y_value : random_roll_y_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = noisy_focused_block_map
-        mask = np.zeros((16, 16, 16), dtype=bool)
-        mask[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_roll_y_value : random_roll_y_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = True
-        return block_map, noisy_block_map, mask
 
 
 def export_to_onnx(model: UNet3d, path_to_output: str) -> None:
@@ -73,6 +31,8 @@ def export_to_onnx(model: UNet3d, path_to_output: str) -> None:
         path_to_output,
         input_names=["input"],
         output_names=["output"],
+        # https://onnxruntime.ai/docs/reference/compatibility.html
+        opset_version=17,
     )
 
 
@@ -82,14 +42,20 @@ def main(argparser: argparse.ArgumentParser) -> None:
     epochs: int = argparser.parse_args().epochs
     batch_size: int = argparser.parse_args().batch_size
     dataset_limit: Optional[int] = argparser.parse_args().dataset_limit
+    dataset_start: Optional[int] = argparser.parse_args().dataset_start
 
     if not os.path.exists(path_to_output):
         os.makedirs(path_to_output)
 
     schematics_list_files = list_schematic_files_in_folder(path_to_schematics)
     schematics_list_files = sorted(schematics_list_files)
+    start = 0
+    end = len(schematics_list_files)
+    if dataset_start is not None:
+        start = dataset_start
     if dataset_limit is not None:
-        schematics_list_files = schematics_list_files[:dataset_limit]
+        end = dataset_limit
+    schematics_list_files = schematics_list_files[start:end]
     # Set the dictionary size to the number of unique blocks in the dataset.
     # And also select the right files to load.
     unique_blocks_dict, unique_counts_coefficients, loaded_schematic_files = (
@@ -107,16 +73,14 @@ def main(argparser: argparse.ArgumentParser) -> None:
     train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files)
     val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files)
 
-    def collate_fn(batch: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        block_map, noisy_block_map, mask = zip(*batch)
-        return np.stack(block_map), np.stack(noisy_block_map), np.stack(mask)
+    def collate_fn(batch: List[MinecraftSchematicsDatasetItemType]) -> MinecraftSchematicsDatasetItemType:
+        block_map, noisy_block_map, mask, loss_mask = zip(*batch)
+        return np.stack(block_map), np.stack(noisy_block_map), np.stack(mask), np.stack(loss_mask)
 
-    train_schematics_dataloader = torch.utils.data.DataLoader(
+    train_schematics_dataloader = DataLoader(
         train_schematics_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
-    val_schematics_dataloader = torch.utils.data.DataLoader(
-        val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn
-    )
+    val_schematics_dataloader = DataLoader(val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn)
 
     model = UNet3d(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
     csv_logger = CSVLogger(save_dir=path_to_output)
@@ -170,5 +134,6 @@ if __name__ == "__main__":
     argparser.add_argument("--epochs", type=int, required=True)
     argparser.add_argument("--batch-size", type=int, required=True)
     argparser.add_argument("--dataset-limit", type=int)
+    argparser.add_argument("--dataset-start", type=int)
 
     main(argparser)

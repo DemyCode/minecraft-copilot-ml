@@ -10,7 +10,6 @@ packages = [{ include = "minecraft_copilot_ml" }]
 python = "^3.10"
 torch = "^2.2.0"
 selenium = "^4.9.1"
-nbtlib = { git = "https://github.com/DemyCode/nbtlib.git", branch = "main" }
 pandas = "^2.0.1"
 tqdm = "^4.65.0"
 scikit-learn = "^1.2.2"
@@ -24,9 +23,12 @@ pydantic = "2.5.3"
 pydantic-settings = "^2.1.0"
 beautifulsoup4 = "^4.12.3"
 seaborn = "^0.13.2"
-onnx = "^1.15.0"
+# https://onnxruntime.ai/docs/reference/compatibility.html
+onnx = "~1.12.0"
+onnxruntime = "~1.13.0"
 litemapy = "^0.8.1b0"
 lightning = "^2.2.0.post0"
+nbtlib = "^2.0.4"
 
 [tool.poetry.group.dev.dependencies]
 ipympl = "^0.9.3"
