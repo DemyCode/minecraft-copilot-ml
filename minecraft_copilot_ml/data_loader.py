@@ -48,7 +48,7 @@ list_of_forbidden_files = [
 
 def create_noisy_block_map(
     block_map: np.ndarray,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, Tuple[np.ndarray, ...]]:
     random_percentage = np.random.random()
     random_indices_from_focused_block_map = np.random.choice(
         np.arange(block_map.size), replace=False, size=int(block_map.size * random_percentage)
@@ -56,7 +56,7 @@ def create_noisy_block_map(
     unraveled_indices = np.unravel_index(random_indices_from_focused_block_map, block_map.shape)
     returned_block_map = block_map.copy()
     returned_block_map[unraveled_indices] = "minecraft:air"
-    return returned_block_map
+    return returned_block_map, unraveled_indices
 
 
 def litematic_to_numpy_minecraft_map(
@@ -200,20 +200,13 @@ class MinecraftSchematicsDataset(Dataset):
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ]
-        result_block_map, (
-            noisy_x_start,
-            noisy_y_start,
-            noisy_z_start,
-            noisy_x_width,
-            noisy_y_height,
-            noisy_z_depth,
-        ) = create_noisy_block_map(focused_block_map)
+        focused_noisy_block_map, unraveled_indices_of_noise = create_noisy_block_map(focused_block_map)
         noisy_block_map = block_map.copy()
         noisy_block_map[
             random_roll_x_value : random_roll_x_value + minimum_width,
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = result_block_map
+        ] = focused_noisy_block_map
         mask = np.zeros((16, 16, 16), dtype=bool)
         mask[
             random_roll_x_value : random_roll_x_value + minimum_width,
@@ -221,11 +214,7 @@ class MinecraftSchematicsDataset(Dataset):
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
         loss_mask = np.ones((16, 16, 16), dtype=int)
-        loss_mask[
-            random_roll_x_value + noisy_x_start : random_roll_x_value + noisy_x_start + noisy_x_width,
-            random_y_height_value + noisy_y_start : random_y_height_value + noisy_y_start + noisy_y_height,
-            random_roll_z_value + noisy_z_start : random_roll_z_value + noisy_z_start + noisy_z_depth,
-        ] = 2
+        loss_mask[unraveled_indices_of_noise] = 2
         return block_map, noisy_block_map, mask, loss_mask
 
 
