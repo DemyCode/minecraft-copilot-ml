@@ -87,10 +87,9 @@ class UNet3d(pl.LightningModule):
         accuracy_on_loss_map = accuracy_truth_map[tensor_loss_masks.bool()].mean()
 
         # Compute reconstruction loss using categorical cross-entropy
-        loss_masks_coefficients = torch.where(tensor_loss_masks == 0, 1, 2).float().to("cuda" if torch.cuda.is_available() else "cpu")
         reconstruction_loss = F.cross_entropy(reconstruction, pre_processed_block_maps, reduction="none")
         reconstruction_loss = reconstruction_loss * tensor_block_map_masks
-        reconstruction_loss = reconstruction_loss * loss_masks_coefficients
+        reconstruction_loss = reconstruction_loss * torch.where(tensor_loss_masks == 1, reconstruction_loss, 1)
         reconstruction_loss = reconstruction_loss * self.unique_counts_coefficients[pre_processed_block_maps]
         loss = reconstruction_loss.mean()
 
