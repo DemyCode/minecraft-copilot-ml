@@ -256,7 +256,5 @@ def get_working_files_and_unique_blocks_and_counts(
             continue
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
     unique_counts_coefficients = np.array([unique_counts[block] for block in unique_blocks_dict])
-    unique_counts_coefficients = unique_counts_coefficients - unique_counts_coefficients.min()
-    unique_counts_coefficients = unique_counts_coefficients / unique_counts_coefficients.max()
-    unique_counts_coefficients = unique_counts_coefficients + 1
+    unique_counts_coefficients = unique_counts_coefficients.max() / unique_counts_coefficients
     return unique_blocks_dict, unique_counts_coefficients, loaded_schematic_files
