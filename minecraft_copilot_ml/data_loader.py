@@ -233,18 +233,18 @@ def get_working_files_and_unique_blocks_and_counts(
     schematics_list_files: list[str],
 ) -> Tuple[Dict[str, int], np.ndarray, list[str]]:
     unique_blocks: Set[str] = set()
-    unique_counts: Dict[str, int] = {}
+    # unique_counts: Dict[str, int] = {}
     loaded_schematic_files: List[str] = []
     tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
     for nbt_file in tqdm_list_files:
         tqdm_list_files.set_description(f"Processing {nbt_file}")
         try:
             numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
-            unique_blocks_in_map, unique_counts_in_map = np.unique(numpy_minecraft_map, return_counts=True)
-            for block, count in zip(unique_blocks_in_map, unique_counts_in_map):
-                if block not in unique_counts:
-                    unique_counts[block] = 0
-                unique_counts[block] += count
+            unique_blocks_in_map = np.unique(numpy_minecraft_map)
+            # for block, count in zip(unique_blocks_in_map, unique_counts_in_map):
+            # if block not in unique_counts:
+            #     unique_counts[block] = 0
+            # unique_counts[block] += count
             for block in unique_blocks_in_map:
                 if block not in unique_blocks:
                     logger.info(f"Found new block: {block}")
@@ -255,6 +255,6 @@ def get_working_files_and_unique_blocks_and_counts(
             logger.exception(e)
             continue
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
-    unique_counts_coefficients = np.array([unique_counts[block] for block in unique_blocks_dict])
-    unique_counts_coefficients = unique_counts_coefficients.max() / unique_counts_coefficients
-    return unique_blocks_dict, unique_counts_coefficients, loaded_schematic_files
+    # unique_counts_coefficients = np.array([unique_counts[block] for block in unique_blocks_dict])
+    # unique_counts_coefficients = unique_counts_coefficients.max() / unique_counts_coefficients
+    return unique_blocks_dict, np.array([1]), loaded_schematic_files
