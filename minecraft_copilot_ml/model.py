@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from minecraft_copilot_ml.data_loader import MinecraftSchematicsDatasetItemType
 
 
@@ -75,7 +75,9 @@ class UNet3d(pl.LightningModule):
         block_maps, noisy_block_maps, block_map_masks, loss_masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
         pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps).float().unsqueeze(1)
-        tensor_block_map_masks = torch.from_numpy(block_map_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
+        tensor_block_map_masks = (
+            torch.from_numpy(block_map_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
+        )
         tensor_loss_masks = (
             torch.from_numpy(loss_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
         )
@@ -132,7 +134,14 @@ class UNet3d(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.1)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": ReduceLROnPlateau(optimizer, mode="max", factor=0.1),
+                "monitor": "val_accuracy_on_loss_map",
+            },
+        }
 
     def on_train_start(self) -> None:
         print(self)
