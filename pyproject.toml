@@ -29,6 +29,7 @@ onnxruntime = "~1.13.0"
 litemapy = "^0.8.1b0"
 lightning = "^2.2.0.post0"
 nbtlib = "^2.0.4"
+torchcfm = {git = "ssh://git@github.com/atong01/conditional-flow-matching", rev = "ec4da0846ddaf77e8406ad2fd592a6f0404ce5ae"}
 
 [tool.poetry.group.dev.dependencies]
 ipympl = "^0.9.3"
