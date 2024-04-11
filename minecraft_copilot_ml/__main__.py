@@ -84,12 +84,12 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     model = UNet3d(unique_blocks_dict, unique_counts_coefficients=unique_counts_coefficients)
     csv_logger = CSVLogger(save_dir=path_to_output)
-    model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_loss", save_top_k=1, save_last=True, mode="min")
+    model_checkpoint = ModelCheckpoint(path_to_output, monitor="val_accuracy_on_loss_map", save_top_k=1, save_last=True, mode="max")
     trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs, log_every_n_steps=1)
     trainer.fit(model, train_schematics_dataloader, val_schematics_dataloader)
 
     # Save the best and last model locally
-    logger.info(f"Best val_loss is: {model_checkpoint.best_model_score}")
+    logger.info(f"Best val_accuracy_on_loss_map is: {model_checkpoint.best_model_score}")
     best_model = UNet3d.load_from_checkpoint(
         model_checkpoint.best_model_path,
         unique_blocks_dict=unique_blocks_dict,
