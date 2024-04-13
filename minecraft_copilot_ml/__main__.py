@@ -87,7 +87,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     unet_model = UnetModelWithDims(
         dims=3,
-        dim=[1, 16, 16, 16],
+        dim=[len(unique_blocks_dict), 16, 16, 16],
         num_channels=32,
         num_res_blocks=4,
         channel_mult=(1, 2, 3, 4),
