@@ -115,9 +115,10 @@ class LightningUNetModel(pl.LightningModule):
         vt = self(t, xt)
         loss = (vt - ut) ** 2
         loss = loss * tensor_block_map_masks_for_one_hot
-        loss = loss.mean()
+        loss = loss.sum()
         loss_dict = {
             "loss": loss,
+            "lr": self.trainer.optimizers[0].param_groups[0]["lr"],
         }
         for name, value in loss_dict.items():
             self.log(
@@ -149,7 +150,15 @@ class LightningUNetModel(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters())
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-2)
+        # return optimizer
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
+                "monitor": "val_loss",
+            },
+        }
 
     def on_train_start(self) -> None:
         print(self)

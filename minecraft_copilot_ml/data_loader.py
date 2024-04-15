@@ -43,6 +43,9 @@ list_of_forbidden_files = [
     "4766.schematic",
     "10380.schematic",
     "12695.schematic",
+    "2985.schematic",
+    "5096.schematic",
+    "5460.schematic",
 ]
 
 
@@ -195,30 +198,36 @@ class MinecraftSchematicsDataset(Dataset):
             minimum_height,
             minimum_depth,
         ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
-        focused_block_map = block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ]
-        focused_noisy_block_map, unraveled_indices_of_noise = create_noisy_block_map(focused_block_map)
-        noisy_block_map = block_map.copy()
-        noisy_block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = focused_noisy_block_map
         block_map_mask = np.zeros((16, 16, 16), dtype=bool)
         block_map_mask[
             random_roll_x_value : random_roll_x_value + minimum_width,
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
-        loss_mask = np.zeros((16, 16, 16), dtype=bool)
-        loss_mask[unraveled_indices_of_noise] = True
-        return block_map, noisy_block_map, block_map_mask, loss_mask
+        return block_map, None, block_map_mask, None
 
 
-def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
+class MinecraftBlockMapDataset(Dataset):
+    def __init__(
+        self,
+        block_map_list_files: List[str],
+        block_map_mask_list_files: List[str],
+    ) -> None:
+        self.block_map_list_files = sorted(block_map_list_files)
+        self.block_map_mask_list_files = sorted(block_map_mask_list_files)
+
+    def __len__(self) -> int:
+        return len(self.block_map_list_files)
+
+    def __getitem__(self, idx: int) -> MinecraftSchematicsDatasetItemType:
+        block_map_file = self.block_map_list_files[idx]
+        block_map = np.load(block_map_file, allow_pickle=True)
+        block_map_mask_file = self.block_map_mask_list_files[idx]
+        block_map_mask = np.load(block_map_mask_file, allow_pickle=True)
+        return block_map, None, block_map_mask, None
+
+
+def list_files_in_folder(path_to_schematics: str) -> list[str]:
     schematics_list_files = []
     tqdm_os_walk = tqdm(os.walk(path_to_schematics), smoothing=0)
     for dirpath, _, filenames in tqdm_os_walk:
@@ -255,6 +264,26 @@ def get_working_files_and_unique_blocks_and_counts(
             logger.exception(e)
             continue
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
-    # unique_counts_coefficients = np.array([unique_counts[block] for block in unique_blocks_dict])
-    # unique_counts_coefficients = unique_counts_coefficients.max() / unique_counts_coefficients
     return unique_blocks_dict, np.array([1]), loaded_schematic_files
+
+
+def get_unique_blocks_from_block_maps(
+    block_map_list_files: list[str],
+) -> Dict[str, int]:
+    unique_blocks: Set[str] = set()
+    tqdm_list_files = tqdm(block_map_list_files, smoothing=0)
+    for block_map_file in tqdm_list_files:
+        tqdm_list_files.set_description(f"Processing {block_map_file}")
+        try:
+            block_map = np.load(block_map_file, allow_pickle=True)
+            unique_blocks_in_map = np.unique(block_map)
+            for block in unique_blocks_in_map:
+                if block not in unique_blocks:
+                    logger.info(f"Found new block: {block}")
+            unique_blocks = unique_blocks.union(unique_blocks_in_map)
+        except Exception as e:
+            logger.error(f"Could not load {block_map_file}")
+            logger.exception(e)
+            continue
+    unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
+    return unique_blocks_dict

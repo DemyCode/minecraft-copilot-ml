@@ -18,9 +18,11 @@ from torchcfm.models.unet import UNetModel  # type: ignore[import-untyped]
 
 from minecraft_copilot_ml.data_loader import (
     MinecraftSchematicsDataset,
+    MinecraftBlockMapDataset,
     MinecraftSchematicsDatasetItemType,
     get_working_files_and_unique_blocks_and_counts,
-    list_schematic_files_in_folder,
+    get_unique_blocks_from_block_maps,
+    list_files_in_folder,
 )
 from minecraft_copilot_ml.model import LightningUNetModel, UnetModelWithDims
 
@@ -41,7 +43,8 @@ def export_to_onnx(model: LightningUNetModel, path_to_output: str) -> None:
 
 
 def main(argparser: argparse.ArgumentParser) -> None:
-    path_to_schematics: str = argparser.parse_args().path_to_schematics
+    path_to_block_maps: str = "/home/mehdi/minecraft-copilot-ml/cut_datasets/minecraft-schematics/block_maps"
+    path_to_block_map_masks: str = "/home/mehdi/minecraft-copilot-ml/cut_datasets/minecraft-schematics/block_map_masks"
     path_to_output: str = argparser.parse_args().path_to_output
     epochs: int = argparser.parse_args().epochs
     batch_size: int = argparser.parse_args().batch_size
@@ -51,39 +54,47 @@ def main(argparser: argparse.ArgumentParser) -> None:
     if not os.path.exists(path_to_output):
         os.makedirs(path_to_output)
 
-    schematics_list_files = list_schematic_files_in_folder(path_to_schematics)
-    schematics_list_files = sorted(schematics_list_files)
+    block_map_list_files = list_files_in_folder(path_to_block_maps)
+    block_map_list_files = sorted(block_map_list_files)
+    block_map_mask_list_files = list_files_in_folder(path_to_block_map_masks)
+    block_map_mask_list_files = sorted(block_map_mask_list_files)
+
+    unique_blocks_dict = get_unique_blocks_from_block_maps(block_map_list_files)
+
     start = 0
-    end = len(schematics_list_files)
+    end = len(block_map_list_files)
     if dataset_start is not None:
         start = dataset_start
     if dataset_limit is not None:
         end = dataset_limit
-    schematics_list_files = schematics_list_files[start:end]
+    block_map_list_files = block_map_list_files[start:end]
     # Set the dictionary size to the number of unique blocks in the dataset.
     # And also select the right files to load.
-    unique_blocks_dict, _, loaded_schematic_files = get_working_files_and_unique_blocks_and_counts(
-        schematics_list_files
-    )
+    # unique_blocks_dict, _, loaded_schematic_files = get_working_files_and_unique_blocks_and_counts(
+    #     schematics_list_files
+    # )
 
-    logger.info(f"Unique blocks: {unique_blocks_dict}")
-    logger.info(f"Number of unique blocks: {len(unique_blocks_dict)}")
-    logger.info(f"Number of loaded schematics files: {len(loaded_schematic_files)}")
+    # logger.info(f"Unique blocks: {unique_blocks_dict}")
+    # logger.info(f"Number of unique blocks: {len(unique_blocks_dict)}")
+    # logger.info(f"Number of loaded schematics files: {len(loaded_schematic_files)}")
 
-    train_schematics_list_files, test_schematics_list_files = train_test_split(
-        loaded_schematic_files, test_size=0.2, random_state=42
-    )
-    train_schematics_dataset = MinecraftSchematicsDataset(train_schematics_list_files)
-    val_schematics_dataset = MinecraftSchematicsDataset(test_schematics_list_files)
+    (
+        train_block_map_list_files,
+        test_block_map_list_files,
+        train_block_map_mask_list_files,
+        test_block_map_mask_list_files,
+    ) = train_test_split(block_map_list_files, block_map_mask_list_files, test_size=0.2, random_state=42)
+    train_block_map_dataset = MinecraftBlockMapDataset(train_block_map_list_files, train_block_map_mask_list_files)
+    val_block_map_dataset = MinecraftBlockMapDataset(test_block_map_list_files, test_block_map_mask_list_files)
 
     def collate_fn(batch: List[MinecraftSchematicsDatasetItemType]) -> MinecraftSchematicsDatasetItemType:
         block_map, noisy_block_map, mask, loss_mask = zip(*batch)
         return np.stack(block_map), np.stack(noisy_block_map), np.stack(mask), np.stack(loss_mask)
 
     train_schematics_dataloader = DataLoader(
-        train_schematics_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
+        train_block_map_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
-    val_schematics_dataloader = DataLoader(val_schematics_dataset, batch_size=batch_size, collate_fn=collate_fn)
+    val_schematics_dataloader = DataLoader(val_block_map_dataset, batch_size=batch_size, collate_fn=collate_fn)
 
     unet_model = UnetModelWithDims(
         dims=3,
