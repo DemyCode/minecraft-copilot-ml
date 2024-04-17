@@ -24,7 +24,7 @@ from minecraft_copilot_ml.data_loader import (
     get_unique_blocks_from_block_maps,
     list_files_in_folder,
 )
-from minecraft_copilot_ml.model import LightningUNetModel, UnetModelWithDims
+from minecraft_copilot_ml.model import LightningUNetModel
 
 
 def export_to_onnx(model: LightningUNetModel, path_to_output: str) -> None:
@@ -96,11 +96,11 @@ def main(argparser: argparse.ArgumentParser) -> None:
     )
     val_schematics_dataloader = DataLoader(val_block_map_dataset, batch_size=batch_size, collate_fn=collate_fn)
 
-    unet_model = UnetModelWithDims(
+    unet_model = UNetModel(
         dims=3,
         dim=[len(unique_blocks_dict), 16, 16, 16],
+        num_res_blocks=1,
         num_channels=32,
-        num_res_blocks=4,
         channel_mult=(1, 2, 3, 4),
     )
     model = LightningUNetModel(unet_model, unique_blocks_dict)
