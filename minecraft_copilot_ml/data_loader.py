@@ -221,9 +221,9 @@ class MinecraftBlockMapDataset(Dataset):
 
     def __getitem__(self, idx: int) -> MinecraftSchematicsDatasetItemType:
         block_map_file = self.block_map_list_files[idx]
-        block_map = np.load(block_map_file, allow_pickle=True)
+        block_map = np.load(block_map_file)
         block_map_mask_file = self.block_map_mask_list_files[idx]
-        block_map_mask = np.load(block_map_mask_file, allow_pickle=True)
+        block_map_mask = np.load(block_map_mask_file)
         return block_map, None, block_map_mask, None
 
 

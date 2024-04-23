@@ -13,12 +13,20 @@ from torchcfm.models.unet import UNetModel  # type: ignore[import-untyped]
 from torchcfm import ExactOptimalTransportConditionalFlowMatcher  # type: ignore[import-untyped]
 
 
+def ema(source: nn.Module, target: nn.Module, decay: float):
+    source_dict = source.state_dict()
+    target_dict = target.state_dict()
+    for key in source_dict.keys():
+        target_dict[key].data.copy_(target_dict[key].data * decay + source_dict[key].data * (1 - decay))
+
+
 class LightningUNetModel(pl.LightningModule):
     def __init__(self, model: UNetModel, unique_blocks_dict: Dict[str, int]) -> None:  # type: ignore[no-any-unimported]
         super(LightningUNetModel, self).__init__()
         self.model = model
         self.flow_matcher = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
         self.unique_blocks_dict = unique_blocks_dict
+        self.automatic_optimization = False
 
     def forward(
         self, t: torch.Tensor, x: torch.Tensor, y: Optional[torch.Tensor] = None, *args: Any, **kwargs: Any
@@ -35,7 +43,6 @@ class LightningUNetModel(pl.LightningModule):
         ).to("cuda" if torch.cuda.is_available() else "cpu")
         tensor_block_map_masks_for_one_hot[:, tensor_block_map_masks == 1] = 1
         tensor_block_map_masks_for_one_hot = tensor_block_map_masks_for_one_hot.permute(1, 0, 2, 3, 4)
-        # print(tensor_block_map_masks_for_one_hot.shape)
         pre_processed_block_maps = self.pre_process(block_maps)
         x1 = pre_processed_block_maps
         x0 = torch.randn_like(x1)
@@ -47,7 +54,7 @@ class LightningUNetModel(pl.LightningModule):
         vt = self(t, xt)
         loss = (vt - ut) ** 2
         loss = loss * tensor_block_map_masks_for_one_hot
-        loss = loss.sum()
+        loss = torch.mean(loss)
         loss_dict = {
             "loss": loss,
             "lr": self.trainer.optimizers[0].param_groups[0]["lr"],
@@ -62,13 +69,19 @@ class LightningUNetModel(pl.LightningModule):
                 logger=True,
                 batch_size=block_maps.shape[0],
             )
-        return loss  # type: ignore[no-any-return]
+        # Optimization
+        optimizer = self.optimizers()[0]
+        optimizer.zero_grad()
+        self.manual_backward(loss)
+        torch.nn.utils.clip_grad_norm_(net_model.parameters(), 1.0)  # new
+        optimizer.step()
+        ema(self, ema_model, 0.9999)  # new
 
     def pre_process(self, x: np.ndarray) -> torch.Tensor:
-        vectorized_x = np.vectorize(lambda x: self.unique_blocks_dict.get(x, self.unique_blocks_dict["minecraft:air"]))(
-            x
-        )
-        vectorized_x = vectorized_x.astype(np.int64)
+        # vectorized_x = np.vectorize(lambda x: self.unique_blocks_dict.get(x, self.unique_blocks_dict["minecraft:air"]))(
+        #     x
+        # )
+        vectorized_x = x.astype(np.int64)
         x_tensor = torch.from_numpy(vectorized_x)
         x_tensor = x_tensor.to("cuda" if torch.cuda.is_available() else "cpu")
         x_tensor = torch.nn.functional.one_hot(x_tensor, num_classes=len(self.unique_blocks_dict))
@@ -82,15 +95,7 @@ class LightningUNetModel(pl.LightningModule):
         return self.step(batch, batch_idx, "val")
 
     def configure_optimizers(self) -> Any:
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-2)
-        # return optimizer
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
-                "monitor": "val_loss",
-            },
-        }
+        return torch.optim.Adam(self.model.parameters(), lr=2e-4)
 
     def on_train_start(self) -> None:
         print(self)
