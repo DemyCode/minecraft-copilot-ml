@@ -72,6 +72,8 @@ def litematic_to_numpy_minecraft_map(
             for z, k in zip(reg.zrange(), range(len(reg.zrange()))):
                 b = reg.getblock(x, y, z)
                 numpy_map[i, j, k] = b.blockid
+    numpy_map[numpy_map == "None"] = "minecraft:air"
+    numpy_map[numpy_map == None] = "minecraft:air"
     return numpy_map
 
 
@@ -93,6 +95,8 @@ def schematic_to_numpy_minecraft_map(
         raise Exception(f"Could not find Blocks or BlockData in {nbt_file}. Known keys: {res.keys()}")
     block_map = np.asarray(block_data).reshape(res["Height"], res["Length"], res["Width"])
     block_map = np.vectorize(palette.get)(block_map)
+    block_map[block_map == "None"] = "minecraft:air"
+    block_map[block_map == None] = "minecraft:air"
     return block_map
 
 

@@ -40,6 +40,7 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         self.save_dir = save_dir
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+        self.automatic_optimization = False
 
     def forward(self, t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
         return self.unet_model(t, xt)  # type: ignore[no-any-return]
@@ -50,18 +51,22 @@ class MinecraftCopilotTrainer(pl.LightningModule):
 
         block_maps, block_map_masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
-        tensor_block_map_masks = (
-            torch.from_numpy(block_map_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
-        )
+        tensor_block_map_masks = torch.from_numpy(block_map_masks).float().to(self.device).long()
+        tensor_block_map_masks_for_one_hot = torch.zeros(
+            (len(self.unique_blocks_dict), block_maps.shape[0], 16, 16, 16)
+        ).to(self.device)
+        tensor_block_map_masks_for_one_hot[:, tensor_block_map_masks == 1] = 1
+        tensor_block_map_masks_for_one_hot = tensor_block_map_masks_for_one_hot.permute(1, 0, 2, 3, 4)
         x1 = pre_processed_block_maps
         x0 = torch.randn_like(x1)
         t, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, x1)
         vt = self(t, xt)
         loss = (ut - vt) ** 2
-        loss = loss * tensor_block_map_masks  # Mask out the loss for the blocks outside the schematic
+        loss = loss * tensor_block_map_masks_for_one_hot  # Mask out the loss for the blocks outside the schematic
         loss = loss.mean()
-        self.backward(loss)
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+        optimizer.step()
         ema(self.unet_model, self.ema_model, 0.9999)
 
         # Total loss
@@ -91,13 +96,15 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         return x_tensor
 
     def post_process(self, x: torch.Tensor) -> np.ndarray:
-        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
+        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(
+            x.argmax(dim=1).cpu().numpy()
+        )
         return predicted_block_maps
 
-    def generate_samples(self, model: UNetModel, model_name: str, timestep: int) -> None:  # type: ignore[no-any-unimported]
-        memory_train = self.training
+    def generate_samples(self, model: UNetModel, model_name: str) -> None:  # type: ignore[no-any-unimported]
+        memory_train = model.training
 
-        self.eval()
+        model.eval()
         model_ = copy.deepcopy(model)
         node_ = NeuralODE(model_, solver="euler", sensitivity="adjoint")
         with torch.no_grad():
@@ -106,18 +113,17 @@ class MinecraftCopilotTrainer(pl.LightningModule):
                 t_span=torch.linspace(0, 1, 100, device=self.device),
             )
         for time_step in range(traj.shape[0]):
-            post_processed = self.post_process(traj[-1])
-            np.save(f"sample_{time_step}.npy", post_processed, allow_pickle=True)
-
+            post_processed = self.post_process(traj[time_step])
+            np.save(f"{self.save_dir}/sample_{model_name}_{time_step}.npy", post_processed, allow_pickle=True)
         self.train(memory_train)
 
-    def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> None:
+    def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> None:  # type: ignore[override]
         self.step(batch, batch_idx, "train")
-        self.step_number += 1
-        if self.step_number % 1 == 0:
+        self.log("step", self.step_number, on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        if self.step_number % 100 == 0:
             logger.info(f"Generating samples at step {self.step_number}...")
-            self.generate_samples(self.unet_model, "unet", self.step_number)
-            self.generate_samples(self.ema_model, "ema", self.step_number)
+            self.generate_samples(self.unet_model, f"unet_{self.step_number}")
+            self.generate_samples(self.ema_model, f"ema_{self.step_number}")
             logger.info(f"Saving model at step {self.step_number}...")
             torch.save(
                 {
@@ -127,9 +133,8 @@ class MinecraftCopilotTrainer(pl.LightningModule):
                 },
                 self.save_dir + f"/model_{self.step_number}.pth",
             )
+        self.step_number += 1
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters(), lr=2e-4)
-
-    def on_train_start(self) -> None:
-        print(self)
+        optimizer = torch.optim.Adam(self.parameters(), lr=2e-4)
+        return optimizer

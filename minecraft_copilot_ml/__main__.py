@@ -70,16 +70,17 @@ def main(argparser: argparse.ArgumentParser) -> None:
         updown=False,
         dropout=0.1,
     )
-    model = MinecraftCopilotTrainer(unet_model, unique_blocks_dict)
+    model = MinecraftCopilotTrainer(unet_model, unique_blocks_dict, save_dir=path_to_output)
     csv_logger = CSVLogger(save_dir=path_to_output)
     model_checkpoint = ModelCheckpoint(path_to_output, save_last=True, mode="min")
-    trainer = pl.Trainer(logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs, log_every_n_steps=1)
+    trainer = pl.Trainer(
+        logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs, log_every_n_steps=1, accelerator="gpu"
+    )
     trainer.fit(model, schematics_dataloader)
 
     # Save the best and last model locally
     last_model = MinecraftCopilotTrainer.load_from_checkpoint(
-        model_checkpoint.last_model_path,
-        unique_blocks_dict=unique_blocks_dict,
+        model_checkpoint.last_model_path, unet_model, unique_blocks_dict, save_dir=path_to_output
     )
     torch.save(last_model, os.path.join(path_to_output, "last_model.pth"))
     with open(os.path.join(path_to_output, "unique_blocks_dict.json"), "w") as f:
