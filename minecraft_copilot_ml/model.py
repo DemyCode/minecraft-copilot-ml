@@ -4,23 +4,16 @@ from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchcfm.models.unet import UNetModel  # type: ignore[import-untyped]
+from improved_diffusion.unet import UNetModel  # type: ignore[import-untyped]
 from torchcfm import ExactOptimalTransportConditionalFlowMatcher  # type: ignore[import-untyped]
 import copy
 from torchdyn.core import NeuralODE  # type: ignore[import-untyped]
 
 from minecraft_copilot_ml.data_loader import MinecraftSchematicsDatasetItemType
-
-
-def ema(source: nn.Module, target: nn.Module, decay: float) -> None:
-    source_dict = source.state_dict()
-    target_dict = target.state_dict()
-    for key in source_dict.keys():
-        target_dict[key].data.copy_(target_dict[key].data * decay + source_dict[key].data * (1 - decay))
 
 
 class MinecraftCopilotTrainer(pl.LightningModule):
@@ -34,7 +27,6 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         self.unique_blocks_dict = unique_blocks_dict
         self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
         self.unet_model = unet_model
-        self.ema_model = copy.deepcopy(unet_model)
         self.flow_matcher = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
         self.step_number = 0
         self.save_dir = save_dir
@@ -42,12 +34,21 @@ class MinecraftCopilotTrainer(pl.LightningModule):
             os.makedirs(save_dir)
         self.automatic_optimization = False
 
-    def forward(self, t: torch.Tensor, xt: torch.Tensor) -> torch.Tensor:
-        return self.unet_model(t, xt)  # type: ignore[no-any-return]
+    def forward(self, xt: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        return self.unet_model(xt, t)  # type: ignore[no-any-return]
 
     def step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int, mode: str) -> None:
         optimizer = self.trainer.optimizers[0]
         optimizer.zero_grad()
+        for param in self.parameters():
+            # Taken from https://pytorch.org/docs/stable/_modules/torch/optim/optimizer.html#Optimizer.add_param_group
+            if param.grad is not None:
+                param.grad.detach_()
+                param.grad.zero_()
+        for param in self.unet_model.parameters():
+            if param.grad is not None:
+                param.grad.detach_()
+                param.grad.zero_()
 
         block_maps, block_map_masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
@@ -60,14 +61,13 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         x1 = pre_processed_block_maps
         x0 = torch.randn_like(x1)
         t, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, x1)
-        vt = self(t, xt)
+        vt = self(xt, t)
         loss = (ut - vt) ** 2
         loss = loss * tensor_block_map_masks_for_one_hot  # Mask out the loss for the blocks outside the schematic
         loss = loss.mean()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
         optimizer.step()
-        ema(self.unet_model, self.ema_model, 0.9999)
 
         # Total loss
         loss_dict = {
@@ -84,6 +84,21 @@ class MinecraftCopilotTrainer(pl.LightningModule):
                 logger=True,
                 batch_size=block_maps.shape[0],
             )
+        torch.cuda.empty_cache()
+        for tensor in [
+            pre_processed_block_maps,
+            tensor_block_map_masks,
+            tensor_block_map_masks_for_one_hot,
+            x1,
+            x0,
+            t,
+            xt,
+            ut,
+            vt,
+            loss,
+        ]:
+            tensor.detach()
+            del tensor
 
     def pre_process(self, x: np.ndarray) -> torch.Tensor:
         vectorized_x = np.vectorize(lambda x: self.unique_blocks_dict.get(x, self.unique_blocks_dict["minecraft:air"]))(
@@ -106,29 +121,36 @@ class MinecraftCopilotTrainer(pl.LightningModule):
 
         model.eval()
         model_ = copy.deepcopy(model)
-        node_ = NeuralODE(model_, solver="euler", sensitivity="adjoint")
-        with torch.no_grad():
-            traj = node_.trajectory(
-                torch.randn((1, len(self.unique_blocks_dict), 16, 16, 16), device=self.device),
-                t_span=torch.linspace(0, 1, 100, device=self.device),
+        from scipy.integrate import odeint
+
+        def vector_field(x: np.ndarray, t: float):
+            reshaped_x = x.reshape(1, len(self.unique_blocks_dict), 16, 16, 16)
+            x_tensor = torch.from_numpy(reshaped_x).float().to(self.device)
+            res = model(x_tensor, torch.tensor([t], device=self.device).float())
+            return res.detach().cpu().numpy().reshape(-1)
+
+        sol = odeint(
+            vector_field,
+            torch.randn((1, len(self.unique_blocks_dict), 16, 16, 16), device="cpu").numpy().reshape(-1),
+            torch.linspace(0, 1, 100, device="cpu").numpy(),
+        )
+        for time_step in range(sol.shape[0]):
+            post_processed = self.post_process(
+                torch.from_numpy(sol[time_step].reshape(1, len(self.unique_blocks_dict), 16, 16, 16))
             )
-        for time_step in range(traj.shape[0]):
-            post_processed = self.post_process(traj[time_step])
             np.save(f"{self.save_dir}/sample_{model_name}_{time_step}.npy", post_processed, allow_pickle=True)
         self.train(memory_train)
 
     def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> None:  # type: ignore[override]
         self.step(batch, batch_idx, "train")
         self.log("step", self.step_number, on_step=True, on_epoch=False, prog_bar=True, logger=True)
-        if self.step_number % 100 == 0:
+        if self.step_number % 20_000 == 0:
             logger.info(f"Generating samples at step {self.step_number}...")
             self.generate_samples(self.unet_model, f"unet_{self.step_number}")
-            self.generate_samples(self.ema_model, f"ema_{self.step_number}")
             logger.info(f"Saving model at step {self.step_number}...")
             torch.save(
                 {
                     "net_model": self.unet_model,
-                    "ema_model": self.ema_model,
                     "step": self.step_number,
                 },
                 self.save_dir + f"/model_{self.step_number}.pth",

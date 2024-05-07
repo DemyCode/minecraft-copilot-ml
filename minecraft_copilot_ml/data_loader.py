@@ -42,6 +42,10 @@ list_of_forbidden_files = [
     "4766.schematic",
     "10380.schematic",
     "12695.schematic",
+    "8675.schematic",
+    "10220.schematic",
+    "5096.schematic",
+    "14191.schematic"
 ]
 
 
@@ -74,6 +78,7 @@ def litematic_to_numpy_minecraft_map(
                 numpy_map[i, j, k] = b.blockid
     numpy_map[numpy_map == "None"] = "minecraft:air"
     numpy_map[numpy_map == None] = "minecraft:air"
+    del nbt_loaded
     return numpy_map
 
 
@@ -97,6 +102,7 @@ def schematic_to_numpy_minecraft_map(
     block_map = np.vectorize(palette.get)(block_map)
     block_map[block_map == "None"] = "minecraft:air"
     block_map[block_map == None] = "minecraft:air"
+    del res
     return block_map
 
 

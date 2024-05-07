@@ -6,13 +6,13 @@ from typing import List, Optional, Set, Tuple
 
 import boto3
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from loguru import logger
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import CSVLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
-from torchcfm.models.unet import UNetModel  # type: ignore[import-untyped]
+from improved_diffusion.unet import UNetModel
 
 from minecraft_copilot_ml.data_loader import (
     MinecraftSchematicsDataset,
@@ -57,18 +57,25 @@ def main(argparser: argparse.ArgumentParser) -> None:
         block_map, block_map_mask = zip(*batch)
         return np.stack(block_map), np.stack(block_map_mask)
 
-    schematics_dataloader = DataLoader(schematics_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    schematics_dataloader = DataLoader(
+        schematics_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        pin_memory=True,
+        num_workers=os.cpu_count(),
+    )
 
     unet_model = UNetModel(
-        dims=3,
-        dim=[len(unique_blocks_dict), 16, 16, 16],
+        in_channels=len(unique_blocks_dict),
+        model_channels=32,
+        out_channels=len(unique_blocks_dict),
         num_res_blocks=2,
-        num_channels=32,
-        channel_mult=(1, 2, 2, 2),
-        num_heads=4,
-        resblock_updown=True,
-        updown=False,
+        num_heads=2,
+        attention_resolutions=[1],
         dropout=0.1,
+        channel_mult=(1, 2, 4, 8),
+        dims=3,
     )
     model = MinecraftCopilotTrainer(unet_model, unique_blocks_dict, save_dir=path_to_output)
     csv_logger = CSVLogger(save_dir=path_to_output)

@@ -26,6 +26,7 @@ litemapy = "^0.8.1b0"
 lightning = "^2.2.0.post0"
 nbtlib = "^2.0.4"
 torchcfm = {git = "ssh://git@github.com/DemyCode/conditional-flow-matching", rev = "e1973e1b4caa1589d2f62679af53b8e912539189"}
+improved-diffusion = {git = "ssh://git@github.com/DemyCode/improved-diffusion", rev = "adbc3cbdb0292108d9f6c576dfb79766db1c8e70"}
 
 [tool.poetry.group.dev.dependencies]
 ipympl = "^0.9.3"
