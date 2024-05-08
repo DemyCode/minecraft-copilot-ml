@@ -22,6 +22,7 @@ from minecraft_copilot_ml.data_loader import (
 )
 from minecraft_copilot_ml.model import MinecraftCopilotTrainer
 
+torch.set_float32_matmul_precision('medium')
 
 def main(argparser: argparse.ArgumentParser) -> None:
     path_to_schematics: str = argparser.parse_args().path_to_schematics
@@ -62,8 +63,8 @@ def main(argparser: argparse.ArgumentParser) -> None:
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fn,
-        pin_memory=True,
-        num_workers=os.cpu_count(),
+        # pin_memory=True,
+        # num_workers=os.cpu_count(),
     )
 
     unet_model = UNetModel(

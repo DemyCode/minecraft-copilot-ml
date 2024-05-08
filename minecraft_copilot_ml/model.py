@@ -120,20 +120,19 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         memory_train = model.training
 
         model.eval()
-        model_ = copy.deepcopy(model)
-        from scipy.integrate import odeint
+        from scipy.integrate import solve_ivp
 
-        def vector_field(x: np.ndarray, t: float):
+        def vector_field(t: float, x: np.ndarray):
             reshaped_x = x.reshape(1, len(self.unique_blocks_dict), 16, 16, 16)
             x_tensor = torch.from_numpy(reshaped_x).float().to(self.device)
             res = model(x_tensor, torch.tensor([t], device=self.device).float())
             return res.detach().cpu().numpy().reshape(-1)
-
-        sol = odeint(
-            vector_field,
-            torch.randn((1, len(self.unique_blocks_dict), 16, 16, 16), device="cpu").numpy().reshape(-1),
-            torch.linspace(0, 1, 100, device="cpu").numpy(),
+        traj = solve_ivp(fun=vector_field, 
+                        t_span=(0, 1), 
+                        y0=np.random.standard_normal((1, len(self.unique_blocks_dict), 16, 16, 16)).reshape(-1),
+                        t_eval=np.linspace(0, 1, 10)
         )
+        sol = traj["y"].transpose(1, 0)
         for time_step in range(sol.shape[0]):
             post_processed = self.post_process(
                 torch.from_numpy(sol[time_step].reshape(1, len(self.unique_blocks_dict), 16, 16, 16))
