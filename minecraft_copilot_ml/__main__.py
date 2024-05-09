@@ -5,14 +5,14 @@ import os
 from typing import List, Optional, Set, Tuple
 
 import boto3
-import numpy as np
 import lightning as pl
+import numpy as np
 import torch
-from loguru import logger
+from improved_diffusion.unet import UNetModel  # type: ignore[import-untyped]
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
+from loguru import logger
 from torch.utils.data import DataLoader
-from improved_diffusion.unet import UNetModel
 
 from minecraft_copilot_ml.data_loader import (
     MinecraftSchematicsDataset,
@@ -22,7 +22,10 @@ from minecraft_copilot_ml.data_loader import (
 )
 from minecraft_copilot_ml.model import MinecraftCopilotTrainer
 
-torch.set_float32_matmul_precision('medium')
+device_name = torch.cuda.get_device_name()
+if device_name is not None and device_name == "GeForce RTX 3090":
+    torch.set_float32_matmul_precision("medium")
+
 
 def main(argparser: argparse.ArgumentParser) -> None:
     path_to_schematics: str = argparser.parse_args().path_to_schematics
@@ -58,13 +61,16 @@ def main(argparser: argparse.ArgumentParser) -> None:
         block_map, block_map_mask = zip(*batch)
         return np.stack(block_map), np.stack(block_map_mask)
 
+    num_workers = os.cpu_count()
+    if num_workers is None:
+        num_workers = 0
+
     schematics_dataloader = DataLoader(
         schematics_dataset,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collate_fn,
-        # pin_memory=True,
-        # num_workers=os.cpu_count(),
+        num_workers=num_workers,
     )
 
     unet_model = UNetModel(
@@ -88,7 +94,10 @@ def main(argparser: argparse.ArgumentParser) -> None:
 
     # Save the best and last model locally
     last_model = MinecraftCopilotTrainer.load_from_checkpoint(
-        model_checkpoint.last_model_path, unet_model, unique_blocks_dict, save_dir=path_to_output
+        model_checkpoint.last_model_path,
+        unet_model=unet_model,
+        unique_blocks_dict=unique_blocks_dict,
+        save_dir=path_to_output,
     )
     torch.save(last_model, os.path.join(path_to_output, "last_model.pth"))
     with open(os.path.join(path_to_output, "unique_blocks_dict.json"), "w") as f:
