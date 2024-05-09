@@ -89,7 +89,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
         out_channels=len(unique_blocks_dict),
         num_res_blocks=2,
         num_heads=2,
-        attention_resolutions=[1],
+        attention_resolutions=[1, 2, 4, 8],
         dropout=0.1,
         channel_mult=(1, 2, 4, 8),
         dims=3,
