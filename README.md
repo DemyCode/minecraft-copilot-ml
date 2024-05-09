@@ -9,9 +9,7 @@ The goal of this repository is to research the optimal Machine Learning model fo
 
 ### Usefull Links :
 
-- [MLFlow Registry](google.com): Register your model metrics and artifacts on this registry
 - [Public Data](http://minecraft-schematics-raw.s3.amazonaws.com/): Raw data used to train the model (schematics files of structures)
-- [Public Data (Processed 16x16x16)](http://minecraft-schematics-16.s3.amazonaws.com/): 16x16x16 cubes of blocks created from the raw data
 - [Docker Image Link](https://gallery.ecr.aws/p3u9i4c1/minecraft-copilot-ml): Registry of images
 
 ## Requirements
@@ -35,8 +33,8 @@ rm requirements.txt
 ## Docker usage
 
 ```
-docker build . -t minecraft-copilot-ml:latest
-docker run minecraft-copilot-ml:latest
+docker build . -t minecraft-copilot-ml
+docker run minecraft-copilot-ml
 ```
 
 ## Development
