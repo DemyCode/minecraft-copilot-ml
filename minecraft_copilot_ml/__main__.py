@@ -22,9 +22,12 @@ from minecraft_copilot_ml.data_loader import (
 )
 from minecraft_copilot_ml.model import MinecraftCopilotTrainer
 
-device_name = torch.cuda.get_device_name()
-if device_name is not None and device_name == "GeForce RTX 3090":
-    torch.set_float32_matmul_precision("medium")
+if torch.cuda.is_available():
+    device_name = torch.cuda.get_device_name()
+    if device_name is not None and device_name == "GeForce RTX 3090":
+        torch.set_float32_matmul_precision("medium")
+else:
+    logger.warning("No CUDA device found.")
 
 
 def main(argparser: argparse.ArgumentParser) -> None:
@@ -88,7 +91,11 @@ def main(argparser: argparse.ArgumentParser) -> None:
     csv_logger = CSVLogger(save_dir=path_to_output)
     model_checkpoint = ModelCheckpoint(path_to_output, save_last=True, mode="min")
     trainer = pl.Trainer(
-        logger=csv_logger, callbacks=model_checkpoint, max_epochs=epochs, log_every_n_steps=1, accelerator="gpu"
+        logger=csv_logger,
+        callbacks=model_checkpoint,
+        max_epochs=epochs,
+        log_every_n_steps=1,
+        accelerator="gpu" if torch.cuda.is_available() else "auto",
     )
     trainer.fit(model, schematics_dataloader)
 

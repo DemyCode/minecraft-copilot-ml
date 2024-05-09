@@ -1550,7 +1550,7 @@ tqdm = "^4.66.4"
 
 [package.source]
 type = "git"
-url = "ssh://git@github.com/DemyCode/improved-diffusion"
+url = "https://github.com/DemyCode/improved-diffusion"
 reference = "HEAD"
 resolved_reference = "751e86be8a5c2451a0c30e2faa546fdae0c7dc9e"
 
@@ -4528,9 +4528,9 @@ forest-flow = ["ForestDiffusion", "scikit-learn", "xgboost"]
 
 [package.source]
 type = "git"
-url = "ssh://git@github.com/DemyCode/conditional-flow-matching"
+url = "https://github.com/atong01/conditional-flow-matching.git"
 reference = "HEAD"
-resolved_reference = "e1973e1b4caa1589d2f62679af53b8e912539189"
+resolved_reference = "ec4da0846ddaf77e8406ad2fd592a6f0404ce5ae"
 
 [[package]]
 name = "torchdiffeq"
@@ -5108,4 +5108,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "1a725c31e79fe3c386fb7a6851f1ba72fdb630ace4b73a91797a60f072921fbd"
+content-hash = "bc783331b840688fdd754921e119ef0066e2ffe463e405440d91c42d0a6d66d1"

@@ -1,16 +1,15 @@
 FROM python:3.10
 
-WORKDIR /app
+WORKDIR /minecraft-copilot-ml
 
 RUN pip install poetry --no-cache-dir
+RUN poetry config virtualenvs.in-project false
 RUN poetry config virtualenvs.create false
 
-COPY pyproject.toml poetry.lock /app/
-RUN poetry export --without-hashes -f requirements.txt -o requirements.txt
-RUN pip install -r requirements.txt --no-cache-dir
+COPY pyproject.toml poetry.lock README.md ./
+RUN poetry install --no-root --only main
 
-COPY . /app/
-COPY minecraft_copilot_ml/ /app/minecraft_copilot_ml/
-RUN poetry install --only main --no-interaction --no-ansi
+COPY minecraft_copilot_ml/ minecraft_copilot_ml/
+RUN poetry install --only main
 
-ENTRYPOINT ["poetry", "run", "python", "minecraft_copilot_ml"]
+ENTRYPOINT ["python", "minecraft_copilot_ml"]

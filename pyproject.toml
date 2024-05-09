@@ -25,8 +25,9 @@ seaborn = "^0.13.2"
 litemapy = "^0.8.1b0"
 lightning = "^2.2.0.post0"
 nbtlib = "^2.0.4"
-torchcfm = { git = "ssh://git@github.com/DemyCode/conditional-flow-matching" }
-improved-diffusion = { git = "ssh://git@github.com/DemyCode/improved-diffusion" }
+# Need to use https version to avoid SSL error
+torchcfm = { git = "https://github.com/atong01/conditional-flow-matching.git" }
+improved-diffusion = { git = "https://github.com/DemyCode/improved-diffusion" }
 
 [tool.poetry.group.dev.dependencies]
 ipympl = "^0.9.3"
