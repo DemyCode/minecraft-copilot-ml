@@ -2,16 +2,14 @@
 import os
 from typing import Any, Dict, Optional, Tuple
 
-from loguru import logger
-import numpy as np
 import lightning as pl
+import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from improved_diffusion.unet import UNetModel  # type: ignore[import-untyped]
+from loguru import logger
+from scipy.integrate import solve_ivp  # type: ignore[import-untyped]
 from torchcfm import ExactOptimalTransportConditionalFlowMatcher  # type: ignore[import-untyped]
-import copy
-from torchdyn.core import NeuralODE  # type: ignore[import-untyped]
 
 from minecraft_copilot_ml.data_loader import MinecraftSchematicsDatasetItemType
 
@@ -120,17 +118,18 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         memory_train = model.training
 
         model.eval()
-        from scipy.integrate import solve_ivp
 
-        def vector_field(t: float, x: np.ndarray):
+        def vector_field(t: float, x: np.ndarray) -> np.ndarray:
             reshaped_x = x.reshape(1, len(self.unique_blocks_dict), 16, 16, 16)
             x_tensor = torch.from_numpy(reshaped_x).float().to(self.device)
             res = model(x_tensor, torch.tensor([t], device=self.device).float())
-            return res.detach().cpu().numpy().reshape(-1)
-        traj = solve_ivp(fun=vector_field, 
-                        t_span=(0, 1), 
-                        y0=np.random.standard_normal((1, len(self.unique_blocks_dict), 16, 16, 16)).reshape(-1),
-                        t_eval=np.linspace(0, 1, 10)
+            return res.detach().cpu().numpy().reshape(-1)  # type: ignore[no-any-return]
+
+        traj = solve_ivp(
+            fun=vector_field,
+            t_span=(0, 1),
+            y0=np.random.standard_normal((1, len(self.unique_blocks_dict), 16, 16, 16)).reshape(-1),
+            t_eval=np.linspace(0, 1, 10),
         )
         sol = traj["y"].transpose(1, 0)
         for time_step in range(sol.shape[0]):
@@ -140,7 +139,7 @@ class MinecraftCopilotTrainer(pl.LightningModule):
             np.save(f"{self.save_dir}/sample_{model_name}_{time_step}.npy", post_processed, allow_pickle=True)
         self.train(memory_train)
 
-    def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> None:  # type: ignore[override]
+    def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> None:
         self.step(batch, batch_idx, "train")
         self.log("step", self.step_number, on_step=True, on_epoch=False, prog_bar=True, logger=True)
         if self.step_number % 20_000 == 0:
