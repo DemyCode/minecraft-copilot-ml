@@ -9,6 +9,6 @@ RUN poetry install --no-root --only main
 
 COPY minecraft_copilot_ml minecraft_copilot_ml
 COPY README.md .
-RUN poetry install
+RUN poetry install --only main
 
 ENTRYPOINT ["./.venv/bin/python", "minecraft_copilot_ml"]
