@@ -1,103 +1,77 @@
 # flake8: noqa: E203
+import os
 from typing import Any, Dict, Optional, Tuple
 
+from loguru import logger
 import numpy as np
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from improved_diffusion.unet import UNetModel  # type: ignore[import-untyped]
+from torchcfm import ExactOptimalTransportConditionalFlowMatcher  # type: ignore[import-untyped]
+import copy
+from torchdyn.core import NeuralODE  # type: ignore[import-untyped]
 
 from minecraft_copilot_ml.data_loader import MinecraftSchematicsDatasetItemType
 
 
-class ConvBlock3d(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int = 3, padding: int = 1):
-        super(ConvBlock3d, self).__init__()
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-        self.bn = nn.BatchNorm3d(out_channels)
-        self.relu = nn.LeakyReLU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        result: torch.Tensor = self.relu(self.bn(self.conv(x)))
-        return result
-
-
-class UNet3d(pl.LightningModule):
-    def __init__(
+class MinecraftCopilotTrainer(pl.LightningModule):
+    def __init__(  # type: ignore[no-any-unimported]
         self,
+        unet_model: UNetModel,
         unique_blocks_dict: Dict[str, int],
-        unique_counts_coefficients: Optional[np.ndarray] = None,
-        latent_dim: int = 64,
+        save_dir: str = "output",
     ):
-        super(UNet3d, self).__init__()
+        super(MinecraftCopilotTrainer, self).__init__()
         self.unique_blocks_dict = unique_blocks_dict
         self.reverse_unique_blocks_dict = {v: k for k, v in unique_blocks_dict.items()}
-        self.latent_dim = latent_dim
-        if unique_counts_coefficients is None:
-            unique_counts_coefficients = np.ones(len(unique_blocks_dict))
-        self.unique_counts_coefficients = (
-            torch.from_numpy(unique_counts_coefficients).float().to("cuda" if torch.cuda.is_available() else "cpu")
-        )
-        self.conv_input = ConvBlock3d(1, 32)
-        self.conv1 = ConvBlock3d(32, 64)
-        self.conv2 = ConvBlock3d(64, 128)
-        self.conv3 = ConvBlock3d(128, 256)
-        self.conv4 = ConvBlock3d(256, 512)
+        self.unet_model = unet_model
+        self.flow_matcher = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
+        self.step_number = 0
+        self.save_dir = save_dir
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        self.automatic_optimization = False
 
-        self.conv6 = ConvBlock3d(512, 256)
-        self.conv7 = ConvBlock3d(256, 128)
-        self.conv8 = ConvBlock3d(128, 64)
-        self.conv9 = ConvBlock3d(64, 32)
-        self.conv_output = nn.Conv3d(32, len(unique_blocks_dict), kernel_size=3, padding=1)
+    def forward(self, xt: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        return self.unet_model(xt, t)  # type: ignore[no-any-return]
 
-    def ml_core(self, x: torch.Tensor) -> torch.Tensor:
-        # Encode input
-        out_conv_input = self.conv_input(x)
-        out_conv_1 = self.conv1(out_conv_input)
-        out_conv_2 = self.conv2(out_conv_1)
-        out_conv_3 = self.conv3(out_conv_2)
-        out_conv_4 = self.conv4(out_conv_3)
+    def step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int, mode: str) -> None:
+        optimizer = self.trainer.optimizers[0]
+        optimizer.zero_grad()
+        for param in self.parameters():
+            # Taken from https://pytorch.org/docs/stable/_modules/torch/optim/optimizer.html#Optimizer.add_param_group
+            if param.grad is not None:
+                param.grad.detach_()
+                param.grad.zero_()
+        for param in self.unet_model.parameters():
+            if param.grad is not None:
+                param.grad.detach_()
+                param.grad.zero_()
 
-        # Decode input
-        out_conv_6 = self.conv6(out_conv_4) + out_conv_3
-        out_conv_7 = self.conv7(out_conv_6) + out_conv_2
-        out_conv_8 = self.conv8(out_conv_7) + out_conv_1
-        out_conv_9 = self.conv9(out_conv_8) + out_conv_input
-        out_conv_output: torch.Tensor = self.conv_output(out_conv_9)
-        return out_conv_output
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        reconstruction = self.ml_core(x)
-        reconstruction = F.softmax(reconstruction, dim=1)
-        return reconstruction
-
-    def step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int, mode: str) -> torch.Tensor:
-        block_maps, noisy_block_maps, block_map_masks, loss_masks = batch
+        block_maps, block_map_masks = batch
         pre_processed_block_maps = self.pre_process(block_maps)
-        pre_processed_noisy_block_maps = self.pre_process(noisy_block_maps).float().unsqueeze(1)
-        tensor_block_map_masks = torch.from_numpy(block_map_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
-        tensor_loss_masks = (
-            torch.from_numpy(loss_masks).float().to("cuda" if torch.cuda.is_available() else "cpu").long()
-        )
-        reconstruction = self.ml_core(pre_processed_noisy_block_maps)
-
-        # Compute accuracy
-        accuracy_truth_map = (reconstruction.argmax(dim=1) == pre_processed_block_maps).float()
-        accuracy_on_block_map = accuracy_truth_map[tensor_block_map_masks.bool()].mean()
-        accuracy_on_loss_map = accuracy_truth_map[tensor_loss_masks.bool()].mean()
-
-        # Compute reconstruction loss using categorical cross-entropy
-        reconstruction_loss = F.cross_entropy(reconstruction, pre_processed_block_maps, reduction="none")
-        reconstruction_loss = reconstruction_loss * tensor_block_map_masks
-        reconstruction_loss = reconstruction_loss * torch.where(tensor_loss_masks == 1, reconstruction_loss, 1)
-        reconstruction_loss = reconstruction_loss * self.unique_counts_coefficients[pre_processed_block_maps]
-        loss = reconstruction_loss.mean()
+        tensor_block_map_masks = torch.from_numpy(block_map_masks).float().to(self.device).long()
+        tensor_block_map_masks_for_one_hot = torch.zeros(
+            (len(self.unique_blocks_dict), block_maps.shape[0], 16, 16, 16)
+        ).to(self.device)
+        tensor_block_map_masks_for_one_hot[:, tensor_block_map_masks == 1] = 1
+        tensor_block_map_masks_for_one_hot = tensor_block_map_masks_for_one_hot.permute(1, 0, 2, 3, 4)
+        x1 = pre_processed_block_maps
+        x0 = torch.randn_like(x1)
+        t, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, x1)
+        vt = self(xt, t)
+        loss = (ut - vt) ** 2
+        loss = loss * tensor_block_map_masks_for_one_hot  # Mask out the loss for the blocks outside the schematic
+        loss = loss.mean()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+        optimizer.step()
 
         # Total loss
         loss_dict = {
             "loss": loss,
-            "accuracy_on_block_map": accuracy_on_block_map,
-            "accuracy_on_loss_map": accuracy_on_loss_map,
             "learning_rate": self.trainer.optimizers[0].param_groups[0]["lr"],
         }
         for name, value in loss_dict.items():
@@ -110,7 +84,21 @@ class UNet3d(pl.LightningModule):
                 logger=True,
                 batch_size=block_maps.shape[0],
             )
-        return loss
+        torch.cuda.empty_cache()
+        for tensor in [
+            pre_processed_block_maps,
+            tensor_block_map_masks,
+            tensor_block_map_masks_for_one_hot,
+            x1,
+            x0,
+            t,
+            xt,
+            ut,
+            vt,
+            loss,
+        ]:
+            tensor.detach()
+            del tensor
 
     def pre_process(self, x: np.ndarray) -> torch.Tensor:
         vectorized_x = np.vectorize(lambda x: self.unique_blocks_dict.get(x, self.unique_blocks_dict["minecraft:air"]))(
@@ -119,20 +107,55 @@ class UNet3d(pl.LightningModule):
         vectorized_x = vectorized_x.astype(np.int64)
         x_tensor = torch.from_numpy(vectorized_x)
         x_tensor = x_tensor.to("cuda" if torch.cuda.is_available() else "cpu")
+        x_tensor = F.one_hot(x_tensor, num_classes=len(self.unique_blocks_dict)).permute(0, 4, 1, 2, 3).float()
         return x_tensor
 
     def post_process(self, x: torch.Tensor) -> np.ndarray:
-        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(x.argmax(dim=1).numpy())
+        predicted_block_maps: np.ndarray = np.vectorize(self.reverse_unique_blocks_dict.get)(
+            x.argmax(dim=1).cpu().numpy()
+        )
         return predicted_block_maps
 
-    def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> torch.Tensor:
-        return self.step(batch, batch_idx, "train")
+    def generate_samples(self, model: UNetModel, model_name: str) -> None:  # type: ignore[no-any-unimported]
+        memory_train = model.training
 
-    def validation_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> torch.Tensor:
-        return self.step(batch, batch_idx, "val")
+        model.eval()
+        from scipy.integrate import solve_ivp
+
+        def vector_field(t: float, x: np.ndarray):
+            reshaped_x = x.reshape(1, len(self.unique_blocks_dict), 16, 16, 16)
+            x_tensor = torch.from_numpy(reshaped_x).float().to(self.device)
+            res = model(x_tensor, torch.tensor([t], device=self.device).float())
+            return res.detach().cpu().numpy().reshape(-1)
+        traj = solve_ivp(fun=vector_field, 
+                        t_span=(0, 1), 
+                        y0=np.random.standard_normal((1, len(self.unique_blocks_dict), 16, 16, 16)).reshape(-1),
+                        t_eval=np.linspace(0, 1, 10)
+        )
+        sol = traj["y"].transpose(1, 0)
+        for time_step in range(sol.shape[0]):
+            post_processed = self.post_process(
+                torch.from_numpy(sol[time_step].reshape(1, len(self.unique_blocks_dict), 16, 16, 16))
+            )
+            np.save(f"{self.save_dir}/sample_{model_name}_{time_step}.npy", post_processed, allow_pickle=True)
+        self.train(memory_train)
+
+    def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> None:  # type: ignore[override]
+        self.step(batch, batch_idx, "train")
+        self.log("step", self.step_number, on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        if self.step_number % 20_000 == 0:
+            logger.info(f"Generating samples at step {self.step_number}...")
+            self.generate_samples(self.unet_model, f"unet_{self.step_number}")
+            logger.info(f"Saving model at step {self.step_number}...")
+            torch.save(
+                {
+                    "net_model": self.unet_model,
+                    "step": self.step_number,
+                },
+                self.save_dir + f"/model_{self.step_number}.pth",
+            )
+        self.step_number += 1
 
     def configure_optimizers(self) -> Any:
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
-
-    def on_train_start(self) -> None:
-        print(self)
+        optimizer = torch.optim.Adam(self.parameters(), lr=2e-4)
+        return optimizer

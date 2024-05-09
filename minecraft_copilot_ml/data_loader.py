@@ -1,5 +1,4 @@
 # flake8: noqa: E203
-import gc
 import os
 import re
 from pathlib import Path
@@ -43,6 +42,10 @@ list_of_forbidden_files = [
     "4766.schematic",
     "10380.schematic",
     "12695.schematic",
+    "8675.schematic",
+    "10220.schematic",
+    "5096.schematic",
+    "14191.schematic"
 ]
 
 
@@ -73,6 +76,9 @@ def litematic_to_numpy_minecraft_map(
             for z, k in zip(reg.zrange(), range(len(reg.zrange()))):
                 b = reg.getblock(x, y, z)
                 numpy_map[i, j, k] = b.blockid
+    numpy_map[numpy_map == "None"] = "minecraft:air"
+    numpy_map[numpy_map == None] = "minecraft:air"
+    del nbt_loaded
     return numpy_map
 
 
@@ -94,13 +100,15 @@ def schematic_to_numpy_minecraft_map(
         raise Exception(f"Could not find Blocks or BlockData in {nbt_file}. Known keys: {res.keys()}")
     block_map = np.asarray(block_data).reshape(res["Height"], res["Length"], res["Width"])
     block_map = np.vectorize(palette.get)(block_map)
+    block_map[block_map == "None"] = "minecraft:air"
+    block_map[block_map == None] = "minecraft:air"
+    del res
     return block_map
 
 
 def nbt_to_numpy_minecraft_map(
     nbt_file: str,
 ) -> np.ndarray:
-    gc.collect()
     if any([Path(nbt_file).parts[-1] == x for x in list_of_forbidden_files]):
         raise Exception(
             f"File {nbt_file} is forbidden. Skipping. If this file is here it is because it generates a SIGKILL."
@@ -171,7 +179,7 @@ def get_random_block_map_and_mask_coordinates(
     )
 
 
-MinecraftSchematicsDatasetItemType = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+MinecraftSchematicsDatasetItemType = Tuple[np.ndarray, np.ndarray]
 
 
 class MinecraftSchematicsDataset(Dataset):
@@ -195,27 +203,13 @@ class MinecraftSchematicsDataset(Dataset):
             minimum_height,
             minimum_depth,
         ) = get_random_block_map_and_mask_coordinates(numpy_minecraft_map, 16, 16, 16)
-        focused_block_map = block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ]
-        focused_noisy_block_map, unraveled_indices_of_noise = create_noisy_block_map(focused_block_map)
-        noisy_block_map = block_map.copy()
-        noisy_block_map[
-            random_roll_x_value : random_roll_x_value + minimum_width,
-            random_y_height_value : random_y_height_value + minimum_height,
-            random_roll_z_value : random_roll_z_value + minimum_depth,
-        ] = focused_noisy_block_map
         block_map_mask = np.zeros((16, 16, 16), dtype=bool)
         block_map_mask[
             random_roll_x_value : random_roll_x_value + minimum_width,
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
-        loss_mask = np.zeros((16, 16, 16), dtype=bool)
-        loss_mask[unraveled_indices_of_noise] = True
-        return block_map, noisy_block_map, block_map_mask, loss_mask
+        return block_map, block_map_mask
 
 
 def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
@@ -229,22 +223,17 @@ def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
     return schematics_list_files
 
 
-def get_working_files_and_unique_blocks_and_counts(
+def get_working_files_and_unique_blocks(
     schematics_list_files: list[str],
-) -> Tuple[Dict[str, int], np.ndarray, list[str]]:
+) -> Tuple[Dict[str, int], list[str]]:
     unique_blocks: Set[str] = set()
-    unique_counts: Dict[str, int] = {}
     loaded_schematic_files: List[str] = []
     tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
     for nbt_file in tqdm_list_files:
         tqdm_list_files.set_description(f"Processing {nbt_file}")
         try:
             numpy_minecraft_map = nbt_to_numpy_minecraft_map(nbt_file)
-            unique_blocks_in_map, unique_counts_in_map = np.unique(numpy_minecraft_map, return_counts=True)
-            for block, count in zip(unique_blocks_in_map, unique_counts_in_map):
-                if block not in unique_counts:
-                    unique_counts[block] = 0
-                unique_counts[block] += count
+            unique_blocks_in_map = set(numpy_minecraft_map.flatten())
             for block in unique_blocks_in_map:
                 if block not in unique_blocks:
                     logger.info(f"Found new block: {block}")
@@ -255,6 +244,4 @@ def get_working_files_and_unique_blocks_and_counts(
             logger.exception(e)
             continue
     unique_blocks_dict = {block: idx for idx, block in enumerate(unique_blocks)}
-    unique_counts_coefficients = np.array([unique_counts[block] for block in unique_blocks_dict])
-    unique_counts_coefficients = unique_counts_coefficients.max() / unique_counts_coefficients
-    return unique_blocks_dict, unique_counts_coefficients, loaded_schematic_files
+    return unique_blocks_dict, loaded_schematic_files
