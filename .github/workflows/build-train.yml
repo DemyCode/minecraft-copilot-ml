@@ -37,8 +37,9 @@ jobs:
         IMAGE_TAG: ${{ github.sha }}
       run: |
         BRANCH_NAME=$(echo '${{ github.ref }}' | sed 's/[^[:alnum:]\.\_\-]/-/g')
+        export DOCKER_BUILDKIT=1
         docker pull $ECR_REGISTRY/$ECR_REGISTRY_ALIAS/$ECR_REPOSITORY:latest || echo 'The image does not exist yet.'
-        docker build --cache-from $ECR_REGISTRY/$ECR_REGISTRY_ALIAS/$ECR_REPOSITORY:latest -t minecraft-copilot-ml .
+        docker build . --cache-from $ECR_REGISTRY/$ECR_REGISTRY_ALIAS/$ECR_REPOSITORY:latest --build-arg BUILDKIT_INLINE_CACHE=1 -t minecraft-copilot-ml
         # docker tag minecraft-copilot-ml $ECR_REGISTRY/$ECR_REGISTRY_ALIAS/$ECR_REPOSITORY:$IMAGE_TAG
         docker tag minecraft-copilot-ml $ECR_REGISTRY/$ECR_REGISTRY_ALIAS/$ECR_REPOSITORY:$BRANCH_NAME
         if [ ${{ github.ref }} = 'refs/heads/master' ]; then
