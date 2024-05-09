@@ -1,6 +1,9 @@
 name: Train Minecraft Copilot ML model
 
 on:
+  push:
+    branches:
+      - master
   workflow_dispatch:
 
 jobs:
