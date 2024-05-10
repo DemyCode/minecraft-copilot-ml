@@ -8,7 +8,8 @@ RUN unzip awscliv2.zip
 RUN ./aws/install
 
 COPY pyproject.toml poetry.lock poetry.toml ./
-RUN poetry install --no-cache-dir --no-root --only main
+RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
+RUN poetry run pip install -r requirements.txt --no-cache-dir
 
 COPY minecraft_copilot_ml minecraft_copilot_ml
 COPY README.md .
