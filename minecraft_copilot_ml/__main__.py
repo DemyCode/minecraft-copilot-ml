@@ -10,7 +10,7 @@ import lightning as pl
 import numpy as np
 import torch
 from improved_diffusion.unet import UNetModel  # type: ignore[import-untyped]
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import CSVLogger
 from loguru import logger
 from torch.utils.data import DataLoader
@@ -96,7 +96,7 @@ def main(argparser: argparse.ArgumentParser) -> None:
     model_checkpoint = ModelCheckpoint(path_to_output, save_last=True, mode="min")
     trainer = pl.Trainer(
         logger=csv_logger,
-        callbacks=model_checkpoint,
+        callbacks=[model_checkpoint, TQDMProgressBar()],
         max_epochs=epochs,
         log_every_n_steps=1,
         accelerator="gpu" if torch.cuda.is_available() else "auto",

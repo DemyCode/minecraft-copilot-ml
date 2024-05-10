@@ -1,6 +1,7 @@
 # flake8: noqa: E203
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Callable, Dict, List, Set, Tuple
 
@@ -45,7 +46,7 @@ list_of_forbidden_files = [
     "8675.schematic",
     "10220.schematic",
     "5096.schematic",
-    "14191.schematic"
+    "14191.schematic",
 ]
 
 
@@ -214,7 +215,7 @@ class MinecraftSchematicsDataset(Dataset):
 
 def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
     schematics_list_files = []
-    tqdm_os_walk = tqdm(os.walk(path_to_schematics), smoothing=0)
+    tqdm_os_walk = tqdm(os.walk(path_to_schematics), smoothing=0, file=sys.stdout)
     for dirpath, _, filenames in tqdm_os_walk:
         for filename in filenames:
             tqdm_os_walk.set_description(desc=f"Found {filename}")
@@ -228,7 +229,7 @@ def get_working_files_and_unique_blocks(
 ) -> Tuple[Dict[str, int], list[str]]:
     unique_blocks: Set[str] = set()
     loaded_schematic_files: List[str] = []
-    tqdm_list_files = tqdm(schematics_list_files, smoothing=0)
+    tqdm_list_files = tqdm(schematics_list_files, smoothing=0, file=sys.stdout)
     for nbt_file in tqdm_list_files:
         tqdm_list_files.set_description(f"Processing {nbt_file}")
         try:
