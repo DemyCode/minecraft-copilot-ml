@@ -42,9 +42,6 @@ def main(argparser: argparse.ArgumentParser) -> None:
     if not os.path.exists(path_to_output):
         os.makedirs(path_to_output)
 
-    # if os.path.exists(path_to_schematics) and os.path.isdir(path_to_schematics):
-    #     logger.info(f"Path to schematics: {path_to_schematics}")
-    # else:
     sync_command = f"aws s3 sync s3://minecraft-schematics-raw {path_to_schematics} --acl public-read --no-sign-request"
     subprocess.run(sync_command, shell=True, check=True)
 
