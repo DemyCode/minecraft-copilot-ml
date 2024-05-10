@@ -13,6 +13,6 @@ RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
 
 COPY minecraft_copilot_ml minecraft_copilot_ml
 COPY README.md .
-RUN poetry install --no-cache-dir --only main
+RUN poetry run pip install .
 
 ENTRYPOINT ["./.venv/bin/python", "minecraft_copilot_ml"]
