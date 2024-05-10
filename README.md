@@ -16,7 +16,11 @@ The goal of this repository is to research the optimal Machine Learning model fo
 
 - [Python 3.10](https://www.python.org/downloads/release/python-3100/)
 - [pip](https://pypi.org/project/pip/)
+
+If running from Docker :
 - [docker](https://docs.docker.com/desktop/)
+- [NVIDIA Graphics Card](https://en.wikipedia.org/wiki/CUDA)
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#prerequisites)
 
 ## Local Installation
 
