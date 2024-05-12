@@ -12,6 +12,7 @@ from scipy.integrate import solve_ivp  # type: ignore[import-untyped]
 from torchcfm import ExactOptimalTransportConditionalFlowMatcher  # type: ignore[import-untyped]
 
 from minecraft_copilot_ml.data_loader import MinecraftSchematicsDatasetItemType
+import gc
 
 
 class MinecraftCopilotTrainer(pl.LightningModule):
@@ -64,7 +65,7 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         loss = loss * tensor_block_map_masks_for_one_hot  # Mask out the loss for the blocks outside the schematic
         loss = loss.mean()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+        # torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
         optimizer.step()
 
         # Total loss
@@ -82,7 +83,6 @@ class MinecraftCopilotTrainer(pl.LightningModule):
                 logger=True,
                 batch_size=block_maps.shape[0],
             )
-        torch.cuda.empty_cache()
         for tensor in [
             pre_processed_block_maps,
             tensor_block_map_masks,
@@ -97,6 +97,8 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         ]:
             tensor.detach()
             del tensor
+        torch.cuda.empty_cache()
+        gc.collect()
 
     def pre_process(self, x: np.ndarray) -> torch.Tensor:
         vectorized_x = np.vectorize(lambda x: self.unique_blocks_dict.get(x, self.unique_blocks_dict["minecraft:air"]))(
@@ -156,5 +158,5 @@ class MinecraftCopilotTrainer(pl.LightningModule):
         self.step_number += 1
 
     def configure_optimizers(self) -> Any:
-        optimizer = torch.optim.Adam(self.parameters(), lr=2e-4)
+        optimizer = torch.optim.Adam(self.parameters(), lr=2e-3)
         return optimizer

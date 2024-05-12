@@ -47,6 +47,7 @@ list_of_forbidden_files = [
     "10220.schematic",
     "5096.schematic",
     "14191.schematic",
+    "10188.schematic"
 ]
 
 
