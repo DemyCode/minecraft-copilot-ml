@@ -4,7 +4,7 @@ https://demycode.github.io/minecraft-copilot-ml/master/
 
 # Minecraft Copilot ML
 
-This repository is the Machine Learning / Data Science part of the minecraft-copilot mod.
+This repository is the Machine Learning / Data Science part of minecraft-copilot.
 The goal of this repository is to research the optimal Machine Learning model for the minecraft copilot.
 
 ### Usefull Links :
