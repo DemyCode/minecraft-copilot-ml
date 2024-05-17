@@ -10,6 +10,8 @@ The goal of this repository is to research the optimal Machine Learning model fo
 ### Usefull Links :
 
 - [Public Data](http://minecraft-schematics-raw.s3.amazonaws.com/): Raw data used to train the model (schematics files of structures)
+    - ```aws s3 sync s3://minecraft-schematics-raw {path_to_schematics} --acl public-read --no-sign-request``` to download the data
+    - https://marketplace.visualstudio.com/items?itemName=Misodee.vscode-nbt to visualize the data
 - [Docker Image Link](https://gallery.ecr.aws/p3u9i4c1/minecraft-copilot-ml): Registry of images
 
 ## Requirements
