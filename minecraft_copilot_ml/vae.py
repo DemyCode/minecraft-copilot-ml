@@ -138,7 +138,8 @@ class VAETrainer(pl.LightningModule):
         tensor_block_map_masks = torch.from_numpy(block_map_masks).to(self.device)
         BCE = BCE * tensor_block_map_masks
         BCE = BCE.mean()
-        KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
+        KLD = KLD.mean()
         loss = BCE + KLD
         loss_dict = {
             "loss": loss,
