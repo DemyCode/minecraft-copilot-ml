@@ -122,7 +122,7 @@ class VAETrainer(pl.LightningModule):
         return x_tensor
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        return torch.optim.AdamW(self.parameters(), lr=1e-4)
 
     def training_step(self, batch: MinecraftSchematicsDatasetItemType, batch_idx: int) -> torch.Tensor:
         return self.step(batch, batch_idx, "train")
@@ -141,10 +141,14 @@ class VAETrainer(pl.LightningModule):
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
         KLD = KLD.mean()
         loss = BCE + KLD
+        accuracy = (recon_x.argmax(dim=1) == pre_processed_block_maps.argmax(dim=1)).float()
+        accuracy = accuracy * tensor_block_map_masks
+        accuracy = accuracy.mean()
         loss_dict = {
             "loss": loss,
             "loss_bce": BCE,
             "loss_kld": KLD,
+            "accuracy": accuracy,
             "learning_rate": self.trainer.optimizers[0].param_groups[0]["lr"],
         }
         for name, value in loss_dict.items():
