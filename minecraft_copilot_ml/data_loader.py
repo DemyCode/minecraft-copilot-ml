@@ -47,7 +47,7 @@ list_of_forbidden_files = [
     "10220.schematic",
     "5096.schematic",
     "14191.schematic",
-    "10188.schematic"
+    "10188.schematic",
 ]
 
 
@@ -188,8 +188,10 @@ class MinecraftSchematicsDataset(Dataset):
     def __init__(
         self,
         schematics_list_files: List[str],
+        unique_blocks_dict: Dict[str, int],
     ) -> None:
         self.schematics_list_files = schematics_list_files
+        self.unique_blocks_dict = unique_blocks_dict
 
     def __len__(self) -> int:
         return len(self.schematics_list_files)
@@ -211,7 +213,8 @@ class MinecraftSchematicsDataset(Dataset):
             random_y_height_value : random_y_height_value + minimum_height,
             random_roll_z_value : random_roll_z_value + minimum_depth,
         ] = True
-        return block_map, block_map_mask
+        block_map_int = np.vectorize(self.unique_blocks_dict.get)(block_map)
+        return block_map_int, block_map_mask
 
 
 def list_schematic_files_in_folder(path_to_schematics: str) -> list[str]:
