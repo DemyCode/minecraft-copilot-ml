@@ -1,69 +1,9 @@
-[tool.poetry]
+[project]
 name = "minecraft-copilot-ml"
 version = "0.1.0"
-description = ""
-authors = ["DemyCode <verycols@gmail.com>"]
+description = "Add your description here"
 readme = "README.md"
-packages = [{ include = "minecraft_copilot_ml" }]
-
-[tool.poetry.dependencies]
-python = "^3.10"
-torch = "^2.2.0"
-selenium = "^4.9.1"
-pandas = "^2.0.1"
-tqdm = "^4.65.0"
-scikit-learn = "^1.2.2"
-boto3 = "^1.34.35"
-boto3-stubs = { extras = ["essential"], version = "^1.34.35" }
-types-requests = "^2.31.0.1"
-loguru = "^0.7.0"
-types-tqdm = "^4.65.0.1"
-pydantic = "2.5.3"
-pydantic-settings = "^2.1.0"
-seaborn = "^0.13.2"
-# https://onnxruntime.ai/docs/reference/compatibility.html
-litemapy = "^0.8.1b0"
-lightning = "^2.2.0.post0"
-nbtlib = "^2.0.4"
-# Need to use https version to avoid SSL error
-torchcfm = { git = "https://github.com/atong01/conditional-flow-matching.git" }
-improved-diffusion = { git = "https://github.com/DemyCode/improved-diffusion" }
-
-[tool.poetry.group.dev.dependencies]
-ipympl = "^0.9.3"
-pre-commit = "^3.3.2"
-black = "^24.1.1"
-flake8 = "^6.0.0"
-ipykernel = "^6.23.0"
-mypy = "^1.3.0"
-pytest = "^7.3.1"
-coverage = "^7.2.7"
-matplotlib = "^3.7.1"
-pytest-watch = "^4.2.0"
-pytest-testmon = "^2.0.8"
-isort = "^5.13.2"
-ipython = "^8.21.0"
-
-[tool.black]
-line-length = 120
-
-[tool.mypy]
-exclude = ['.venv']
-disallow_untyped_defs = true
-disallow_any_unimported = true
-no_implicit_optional = true
-check_untyped_defs = true
-warn_return_any = true
-show_error_codes = true
-warn_unused_ignores = true
-
-[tool.coverage.run]
-source = ["minecraft_copilot_ml"]
-
-[tool.isort]
-profile = "black"
-line_length = 120
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.2.5",
+]
