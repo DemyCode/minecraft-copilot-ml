@@ -4,4 +4,10 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["numpy>=2.2.5", "torch>=2.0.0", "nbtlib>=2.0.0"]
+dependencies = [
+  "numpy>=2.2.5",
+  "torch>=2.0.0",
+  "nbtlib>=2.0.0",
+  "tqdm>=4.65.0",
+  "matplotlib>=3.7.0",
+]
