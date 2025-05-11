@@ -485,6 +485,7 @@ def train_vae(
             # Backward pass
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
             optimizer.step()
 
             # Calculate accuracy
@@ -732,6 +733,7 @@ if __name__ == "__main__":
         chunk_size=16,
         cache_file="cache/block_mappings.pkl",
         max_files=None,  # Use all files
+        # preload=True,
     )
 
     # Split into train and validation sets
@@ -743,10 +745,10 @@ if __name__ == "__main__":
 
     # Create DataLoaders
     train_dataloader = DataLoader(
-        train_dataset, batch_size=32, shuffle=True, num_workers=8
+        train_dataset, batch_size=64, shuffle=True, num_workers=8, pin_memory=True
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=32, shuffle=False, num_workers=8
+        val_dataset, batch_size=64, shuffle=False, num_workers=8, pin_memory=True
     )
 
     # Create the VAE
@@ -759,16 +761,17 @@ if __name__ == "__main__":
     ).to(device)
 
     # Create optimizer
-    optimizer = torch.optim.Adam(vae.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(vae.parameters(), lr=1e-3)
 
     # Train the VAE
     losses = train_vae(
         vae=vae,
+        # use_class_weights=True,
         dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         optimizer=optimizer,
         device=device,
-        epochs=10,
+        epochs=100,
         kld_weight=0.01,
     )
 
