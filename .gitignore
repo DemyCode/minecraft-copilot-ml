@@ -1,6 +1,10 @@
 # Ignore Minecraft schematics raw data
 minecraft-schematics-raw/
 
+# Ignore cache and models directories
+cache/
+models/
+
 # Python
 __pycache__/
 *.py[cod]
