@@ -409,47 +409,29 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
         
         # Validation phase
         if val_dataloader is not None:
-            vae.eval()
-            val_loss = 0
-            val_recon_loss = 0
-            val_kld_loss = 0
+            # Use the evaluate_vae function with verbose=False to avoid duplicate printing
+            val_results = evaluate_vae(
+                vae=vae,
+                dataloader=val_dataloader,
+                device=device,
+                kld_weight=kld_weight,
+                num_samples=0,  # Don't need samples during training
+                verbose=False
+            )
             
-            with torch.no_grad():
-                for batch in val_dataloader:
-                    # Get data
-                    blocks = batch['blocks'].to(device)
-                    mask = batch['mask'].to(device)
-                    
-                    # Forward pass
-                    reconstructed, mu, log_var = vae(blocks, mask)
-                    
-                    # Calculate loss
-                    loss, recon_loss, kld_loss = vae_loss_function(
-                        reconstructed, blocks, mu, log_var, mask, kld_weight
-                    )
-                    
-                    # Update totals
-                    val_loss += loss.item()
-                    val_recon_loss += recon_loss.item()
-                    val_kld_loss += kld_loss.item()
-            
-            # Calculate average validation losses
-            avg_val_loss = val_loss / len(val_dataloader)
-            avg_val_recon_loss = val_recon_loss / len(val_dataloader)
-            avg_val_kld_loss = val_kld_loss / len(val_dataloader)
-            
-            print(f"  Val Loss: {avg_val_loss:.4f}")
-            print(f"  Val Reconstruction Loss: {avg_val_recon_loss:.4f}")
-            print(f"  Val KLD Loss: {avg_val_kld_loss:.4f}")
+            # Print validation results
+            print(f"  Val Loss: {val_results['loss']:.4f}")
+            print(f"  Val Reconstruction Loss: {val_results['recon_loss']:.4f}")
+            print(f"  Val KLD Loss: {val_results['kld_loss']:.4f}")
             
             # Save loss with validation
             losses.append({
                 'total': avg_loss,
                 'reconstruction': avg_recon_loss,
                 'kld': avg_kld_loss,
-                'val_total': avg_val_loss,
-                'val_reconstruction': avg_val_recon_loss,
-                'val_kld': avg_val_kld_loss
+                'val_total': val_results['loss'],
+                'val_reconstruction': val_results['recon_loss'],
+                'val_kld': val_results['kld_loss']
             })
         else:
             # Save loss without validation
@@ -462,7 +444,7 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
     return losses
 
 
-def evaluate_vae(vae, dataloader, device="cuda", num_samples=5):
+def evaluate_vae(vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5, verbose=True):
     """
     Evaluate the VAE on a validation set.
     
@@ -470,7 +452,9 @@ def evaluate_vae(vae, dataloader, device="cuda", num_samples=5):
         vae (MinecraftVAE): The VAE model
         dataloader (DataLoader): DataLoader for the validation data
         device (str): Device to use
+        kld_weight (float): Weight for the KL divergence term
         num_samples (int): Number of samples to visualize
+        verbose (bool): Whether to print evaluation results
         
     Returns:
         dict: Evaluation metrics
@@ -494,7 +478,7 @@ def evaluate_vae(vae, dataloader, device="cuda", num_samples=5):
             
             # Calculate loss
             loss, recon_loss, kld_loss = vae_loss_function(
-                reconstructed, blocks, mu, log_var, mask
+                reconstructed, blocks, mu, log_var, mask, kld_weight
             )
             
             # Update totals
@@ -518,14 +502,15 @@ def evaluate_vae(vae, dataloader, device="cuda", num_samples=5):
     avg_recon_loss = total_recon_loss / len(dataloader)
     avg_kld_loss = total_kld_loss / len(dataloader)
     
-    print(f"Evaluation:")
-    print(f"  Loss: {avg_loss:.4f}")
-    print(f"  Reconstruction Loss: {avg_recon_loss:.4f}")
-    print(f"  KLD Loss: {avg_kld_loss:.4f}")
+    if verbose:
+        print(f"Evaluation:")
+        print(f"  Loss: {avg_loss:.4f}")
+        print(f"  Reconstruction Loss: {avg_recon_loss:.4f}")
+        print(f"  KLD Loss: {avg_kld_loss:.4f}")
     
     return {
         'loss': avg_loss,
-        'reconstruction_loss': avg_recon_loss,
+        'recon_loss': avg_recon_loss,
         'kld_loss': avg_kld_loss,
         'samples': samples
     }

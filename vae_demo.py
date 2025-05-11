@@ -378,7 +378,8 @@ def main(args):
         eval_results = evaluate_vae(
             vae=vae,
             dataloader=val_dataloader,
-            device=device
+            device=device,
+            kld_weight=args.kld_weight
         )
     
     # Visualize latent space if specified
