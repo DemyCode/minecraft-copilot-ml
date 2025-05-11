@@ -359,6 +359,7 @@ def main(args):
             vae=vae,
             dataloader=train_dataloader,
             optimizer=optimizer,
+            val_dataloader=val_dataloader,
             device=device,
             epochs=args.epochs,
             kld_weight=args.kld_weight

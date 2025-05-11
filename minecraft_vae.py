@@ -342,7 +342,7 @@ def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=
     return total_loss, recon_loss, kld_loss
 
 
-def train_vae(vae, dataloader, optimizer, device="cuda", epochs=10, kld_weight=0.01):
+def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", epochs=10, kld_weight=0.01):
     """
     Train the VAE.
     
@@ -350,6 +350,7 @@ def train_vae(vae, dataloader, optimizer, device="cuda", epochs=10, kld_weight=0
         vae (MinecraftVAE): The VAE model
         dataloader (DataLoader): DataLoader for the training data
         optimizer (torch.optim.Optimizer): Optimizer
+        val_dataloader (DataLoader, optional): DataLoader for validation data
         device (str): Device to use
         epochs (int): Number of epochs
         kld_weight (float): Weight for the KL divergence term
@@ -357,10 +358,11 @@ def train_vae(vae, dataloader, optimizer, device="cuda", epochs=10, kld_weight=0
     Returns:
         list: Training losses
     """
-    vae.train()
     losses = []
     
     for epoch in range(epochs):
+        # Training phase
+        vae.train()
         epoch_loss = 0
         epoch_recon_loss = 0
         epoch_kld_loss = 0
@@ -401,15 +403,61 @@ def train_vae(vae, dataloader, optimizer, device="cuda", epochs=10, kld_weight=0
         avg_kld_loss = epoch_kld_loss / len(dataloader)
         
         print(f"Epoch {epoch+1}/{epochs}:")
-        print(f"  Loss: {avg_loss:.4f}")
-        print(f"  Reconstruction Loss: {avg_recon_loss:.4f}")
-        print(f"  KLD Loss: {avg_kld_loss:.4f}")
+        print(f"  Train Loss: {avg_loss:.4f}")
+        print(f"  Train Reconstruction Loss: {avg_recon_loss:.4f}")
+        print(f"  Train KLD Loss: {avg_kld_loss:.4f}")
         
-        losses.append({
-            'total': avg_loss,
-            'reconstruction': avg_recon_loss,
-            'kld': avg_kld_loss
-        })
+        # Validation phase
+        if val_dataloader is not None:
+            vae.eval()
+            val_loss = 0
+            val_recon_loss = 0
+            val_kld_loss = 0
+            
+            with torch.no_grad():
+                for batch in val_dataloader:
+                    # Get data
+                    blocks = batch['blocks'].to(device)
+                    mask = batch['mask'].to(device)
+                    
+                    # Forward pass
+                    reconstructed, mu, log_var = vae(blocks, mask)
+                    
+                    # Calculate loss
+                    loss, recon_loss, kld_loss = vae_loss_function(
+                        reconstructed, blocks, mu, log_var, mask, kld_weight
+                    )
+                    
+                    # Update totals
+                    val_loss += loss.item()
+                    val_recon_loss += recon_loss.item()
+                    val_kld_loss += kld_loss.item()
+            
+            # Calculate average validation losses
+            avg_val_loss = val_loss / len(val_dataloader)
+            avg_val_recon_loss = val_recon_loss / len(val_dataloader)
+            avg_val_kld_loss = val_kld_loss / len(val_dataloader)
+            
+            print(f"  Val Loss: {avg_val_loss:.4f}")
+            print(f"  Val Reconstruction Loss: {avg_val_recon_loss:.4f}")
+            print(f"  Val KLD Loss: {avg_val_kld_loss:.4f}")
+            
+            # Save loss with validation
+            losses.append({
+                'total': avg_loss,
+                'reconstruction': avg_recon_loss,
+                'kld': avg_kld_loss,
+                'val_total': avg_val_loss,
+                'val_reconstruction': avg_val_recon_loss,
+                'val_kld': avg_val_kld_loss
+            })
+        else:
+            # Save loss without validation
+            losses.append({
+                'total': avg_loss,
+                'reconstruction': avg_recon_loss,
+                'kld': avg_kld_loss
+            })
     
     return losses
 

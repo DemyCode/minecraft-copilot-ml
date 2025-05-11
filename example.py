@@ -119,6 +119,7 @@ losses = train_vae(
     vae=vae,
     dataloader=train_dataloader,
     optimizer=optimizer,
+    val_dataloader=val_dataloader,
     device=device,
     epochs=2,
     kld_weight=0.01
