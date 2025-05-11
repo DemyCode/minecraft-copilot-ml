@@ -310,7 +310,97 @@ class MinecraftVAE(nn.Module):
         return torch.stack(interpolated)
 
 
-def calculate_class_weights(dataloader, num_classes, device="cuda", method="effective_samples", beta=0.9999):
+def count_blocks_in_batch(batch_data):
+    """
+    Count block occurrences in a single batch.
+    This function is designed to be used with multiprocessing.
+    
+    Args:
+        batch_data (tuple): Tuple containing (blocks, mask, num_classes)
+        
+    Returns:
+        torch.Tensor: Histogram of block counts
+    """
+    blocks, mask, num_classes = batch_data
+    # Only count blocks where mask is 1
+    valid_blocks = blocks[mask.bool()]
+    
+    # Update counts using histogram
+    return torch.histc(
+        valid_blocks.float(), bins=num_classes, min=0, max=num_classes - 1
+    )
+
+
+def count_blocks_parallel(dataloader, num_classes, device="cuda", cache_file=None, force_recount=False):
+    """
+    Count block occurrences in parallel using multiprocessing.
+    Also supports caching results to avoid recounting.
+    
+    Args:
+        dataloader (DataLoader): DataLoader for the training data
+        num_classes (int): Number of block types
+        device (str): Device to use
+        cache_file (str, optional): Path to cache file
+        force_recount (bool): Whether to force recounting even if cache exists
+        
+    Returns:
+        torch.Tensor: Tensor of class counts
+    """
+    import os
+    import multiprocessing as mp
+    from functools import partial
+    
+    # Check if cache exists and use it if available
+    if cache_file and os.path.exists(cache_file) and not force_recount:
+        print(f"Loading block counts from cache: {cache_file}")
+        try:
+            class_counts = torch.load(cache_file)
+            print(f"Successfully loaded cached block counts with shape: {class_counts.shape}")
+            return class_counts.to(device)
+        except Exception as e:
+            print(f"Error loading cache: {e}. Will recount blocks.")
+    
+    print("Counting block occurrences in parallel...")
+    
+    # Prepare batches for parallel processing
+    # Move data to CPU for multiprocessing
+    batches = []
+    for batch in dataloader:
+        blocks = batch["blocks"].cpu()
+        mask = batch["mask"].cpu()
+        batches.append((blocks, mask, num_classes))
+    
+    # Use multiprocessing to count blocks in parallel
+    num_processes = min(mp.cpu_count(), 8)  # Limit to 8 processes max
+    print(f"Using {num_processes} processes for parallel counting")
+    
+    with mp.Pool(processes=num_processes) as pool:
+        # Process batches in parallel
+        results = list(tqdm(
+            pool.imap(count_blocks_in_batch, batches),
+            total=len(batches),
+            desc="Counting block types"
+        ))
+    
+    # Combine results
+    class_counts = torch.zeros(num_classes)
+    for result in results:
+        class_counts += result
+    
+    # Move to specified device
+    class_counts = class_counts.to(device)
+    
+    # Cache results if cache_file is provided
+    if cache_file:
+        print(f"Saving block counts to cache: {cache_file}")
+        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+        torch.save(class_counts.cpu(), cache_file)
+    
+    return class_counts
+
+
+def calculate_class_weights(dataloader, num_classes, device="cuda", method="effective_samples", beta=0.9999, 
+                           cache_file="cache/block_counts.pt", force_recount=False):
     """
     Calculate class weights based on frequency in the dataset.
     Rare classes get higher weights, common classes get lower weights.
@@ -328,27 +418,22 @@ def calculate_class_weights(dataloader, num_classes, device="cuda", method="effe
         device (str): Device to use
         method (str): Method to calculate weights ('inverse', 'log', 'sqrt', 'effective_samples', 'balanced')
         beta (float): Parameter for effective number of samples method (0.9-0.999)
+        cache_file (str): Path to cache file for block counts
+        force_recount (bool): Whether to force recounting even if cache exists
 
     Returns:
         torch.Tensor: Class weights tensor
     """
     print(f"Calculating class weights using '{method}' method...")
-    # Initialize class counts
-    class_counts = torch.zeros(num_classes, device=device)
-
-    # Count occurrences of each class
-    for batch in tqdm(dataloader, desc="Counting block types"):
-        blocks = batch["blocks"].to(device)
-        mask = batch["mask"].to(device)
-
-        # Only count blocks where mask is 1
-        valid_blocks = blocks[mask.bool()]
-
-        # Update counts using histogram
-        class_histogram = torch.histc(
-            valid_blocks.float(), bins=num_classes, min=0, max=num_classes - 1
-        )
-        class_counts += class_histogram
+    
+    # Count blocks using parallel processing and caching
+    class_counts = count_blocks_parallel(
+        dataloader, 
+        num_classes, 
+        device=device,
+        cache_file=cache_file,
+        force_recount=force_recount
+    )
 
     # Calculate weights based on the selected method
     epsilon = 1e-6  # Small value to avoid division by zero
@@ -466,7 +551,7 @@ def vae_loss_function(
     return total_loss, recon_loss, kld_loss
 
 
-def compare_weighting_methods(dataloader, num_classes, device="cuda"):
+def compare_weighting_methods(dataloader, num_classes, device="cuda", cache_file="cache/block_counts.pt", force_recount=False):
     """
     Compare different class weighting methods and visualize their effects.
     
@@ -474,24 +559,22 @@ def compare_weighting_methods(dataloader, num_classes, device="cuda"):
         dataloader (DataLoader): DataLoader for the training data
         num_classes (int): Number of block types
         device (str): Device to use
+        cache_file (str): Path to cache file for block counts
+        force_recount (bool): Whether to force recounting even if cache exists
     
     Returns:
         dict: Dictionary of class weights for each method
     """
     print("Comparing different class weighting methods...")
     
-    # Initialize class counts
-    class_counts = torch.zeros(num_classes, device=device)
-    
-    # Count occurrences of each class
-    for batch in tqdm(dataloader, desc="Counting block types"):
-        blocks = batch["blocks"].to(device)
-        mask = batch["mask"].to(device)
-        valid_blocks = blocks[mask.bool()]
-        class_histogram = torch.histc(
-            valid_blocks.float(), bins=num_classes, min=0, max=num_classes - 1
-        )
-        class_counts += class_histogram
+    # Count blocks using parallel processing and caching
+    class_counts = count_blocks_parallel(
+        dataloader, 
+        num_classes, 
+        device=device,
+        cache_file=cache_file,
+        force_recount=force_recount
+    )
     
     # Calculate weights using different methods
     methods = ['inverse', 'log', 'sqrt', 'effective_samples', 'balanced']
@@ -686,12 +769,17 @@ def train_vae(
     class_weights = None
     if use_class_weights:
         # Use the method specified by command-line arguments or the default
+        cache_file = None if (args and args.no_cache) else (args.cache_file if args else "cache/block_counts.pt")
+        force_recount = args.force_recount if args else False
+        
         class_weights = calculate_class_weights(
             dataloader, 
             vae.num_blocks, 
             device,
-            method=args.weight_method,  # From command-line arguments
-            beta=args.beta  # From command-line arguments
+            method=args.weight_method if args else "effective_samples",
+            beta=args.beta if args else 0.9999,
+            cache_file=cache_file,
+            force_recount=force_recount
         )
 
     for epoch in range(epochs):
@@ -977,6 +1065,22 @@ if __name__ == "__main__":
         type=float, 
         default=0.9999,
         help="Beta parameter for effective_samples method (default: 0.9999)"
+    )
+    parser.add_argument(
+        "--cache-file",
+        type=str,
+        default="cache/block_counts.pt",
+        help="Path to cache file for block counts (default: cache/block_counts.pt)"
+    )
+    parser.add_argument(
+        "--force-recount",
+        action="store_true",
+        help="Force recounting blocks even if cache exists"
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable caching of block counts"
     )
     args = parser.parse_args()
     
