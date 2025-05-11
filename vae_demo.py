@@ -39,7 +39,12 @@ def visualize_3d_blocks(blocks, mask=None, block_to_color=None, title=None, ax=N
     if block_to_color is None:
         # Create a colormap
         import matplotlib.colors as mcolors
-        cmap = plt.cm.get_cmap('tab20', 20)
+        try:
+            # For matplotlib >= 3.7
+            cmap = plt.colormaps['tab20']
+        except:
+            # For older matplotlib versions
+            cmap = plt.cm.get_cmap('tab20', 20)
         
         # Create a mapping from block indices to colors
         unique_blocks = np.unique(blocks)
@@ -47,42 +52,41 @@ def visualize_3d_blocks(blocks, mask=None, block_to_color=None, title=None, ax=N
         for i, block_idx in enumerate(unique_blocks):
             block_to_color[block_idx] = cmap(i % 20)
     
-    # Create a 3D array of colors
-    colors = np.zeros(blocks.shape + (4,), dtype=np.float32)
-    
-    # Fill in the colors
-    for i in range(blocks.shape[0]):
-        for j in range(blocks.shape[1]):
-            for k in range(blocks.shape[2]):
-                if mask is None or mask[i, j, k] > 0:
-                    block_idx = blocks[i, j, k]
-                    colors[i, j, k] = block_to_color.get(block_idx, [0, 0, 0, 0])
-    
     # Create a figure if not provided
     if ax is None:
         fig = plt.figure(figsize=(10, 10))
         ax = fig.add_subplot(111, projection='3d')
     
-    # Plot the blocks
-    x, y, z = np.indices(blocks.shape)
+    # Plot the blocks as scatter points instead of voxels
+    # This is more compatible across matplotlib versions
+    points = []
+    colors = []
     
-    # Only plot non-empty blocks
-    if mask is not None:
-        mask_bool = mask > 0
-        x = x[mask_bool]
-        y = y[mask_bool]
-        z = z[mask_bool]
-        colors = colors[mask_bool]
-    else:
-        # Filter out air blocks (assuming 0 is air)
-        non_air = blocks > 0
-        x = x[non_air]
-        y = y[non_air]
-        z = z[non_air]
-        colors = colors[non_air]
+    for i in range(blocks.shape[0]):
+        for j in range(blocks.shape[1]):
+            for k in range(blocks.shape[2]):
+                block_idx = blocks[i, j, k]
+                
+                # Skip air blocks (assuming 0 is air/padding)
+                if block_idx == 0:
+                    continue
+                
+                # Skip masked blocks
+                if mask is not None and mask[i, j, k] == 0:
+                    continue
+                
+                points.append((i, j, k))
+                colors.append(block_to_color.get(block_idx, [0, 0, 0, 1]))
     
-    # Plot the blocks
-    ax.voxels(blocks, facecolors=colors, edgecolor='k', alpha=0.7)
+    if points:
+        points = np.array(points)
+        colors = np.array(colors)
+        
+        # Plot as scatter
+        ax.scatter(
+            points[:, 0], points[:, 1], points[:, 2],
+            c=colors, marker='s', s=100, alpha=0.7
+        )
     
     # Set labels
     ax.set_xlabel('X')
