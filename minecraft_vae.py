@@ -366,6 +366,8 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
         epoch_loss = 0
         epoch_recon_loss = 0
         epoch_kld_loss = 0
+        epoch_correct = 0
+        epoch_valid_positions = 0
         
         progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
         for batch in progress_bar:
@@ -386,26 +388,39 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
             loss.backward()
             optimizer.step()
             
+            # Calculate accuracy
+            with torch.no_grad():
+                pred_blocks = torch.argmax(reconstructed, dim=-1)
+                correct = (pred_blocks == blocks) & (mask.bool())
+                epoch_correct += correct.sum().item()
+                epoch_valid_positions += mask.sum().item()
+            
             # Update progress bar
             epoch_loss += loss.item()
             epoch_recon_loss += recon_loss.item()
             epoch_kld_loss += kld_loss.item()
             
+            # Calculate current accuracy
+            current_accuracy = epoch_correct / epoch_valid_positions if epoch_valid_positions > 0 else 0
+            
             progress_bar.set_postfix({
                 'loss': epoch_loss / (progress_bar.n + 1),
                 'recon_loss': epoch_recon_loss / (progress_bar.n + 1),
-                'kld_loss': epoch_kld_loss / (progress_bar.n + 1)
+                'kld_loss': epoch_kld_loss / (progress_bar.n + 1),
+                'acc': current_accuracy
             })
         
-        # Calculate average losses
+        # Calculate average losses and accuracy
         avg_loss = epoch_loss / len(dataloader)
         avg_recon_loss = epoch_recon_loss / len(dataloader)
         avg_kld_loss = epoch_kld_loss / len(dataloader)
+        avg_accuracy = epoch_correct / epoch_valid_positions if epoch_valid_positions > 0 else 0
         
         print(f"Epoch {epoch+1}/{epochs}:")
         print(f"  Train Loss: {avg_loss:.4f}")
         print(f"  Train Reconstruction Loss: {avg_recon_loss:.4f}")
         print(f"  Train KLD Loss: {avg_kld_loss:.4f}")
+        print(f"  Train Accuracy: {avg_accuracy:.4f} ({epoch_correct}/{epoch_valid_positions})")
         
         # Validation phase
         if val_dataloader is not None:
@@ -423,22 +438,26 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
             print(f"  Val Loss: {val_results['loss']:.4f}")
             print(f"  Val Reconstruction Loss: {val_results['recon_loss']:.4f}")
             print(f"  Val KLD Loss: {val_results['kld_loss']:.4f}")
+            print(f"  Val Accuracy: {val_results['accuracy']:.4f} ({val_results['correct']}/{val_results['total']})")
             
             # Save loss with validation
             losses.append({
                 'total': avg_loss,
                 'reconstruction': avg_recon_loss,
                 'kld': avg_kld_loss,
+                'accuracy': avg_accuracy,
                 'val_total': val_results['loss'],
                 'val_reconstruction': val_results['recon_loss'],
-                'val_kld': val_results['kld_loss']
+                'val_kld': val_results['kld_loss'],
+                'val_accuracy': val_results['accuracy']
             })
         else:
             # Save loss without validation
             losses.append({
                 'total': avg_loss,
                 'reconstruction': avg_recon_loss,
-                'kld': avg_kld_loss
+                'kld': avg_kld_loss,
+                'accuracy': avg_accuracy
             })
     
     return losses
@@ -463,6 +482,8 @@ def evaluate_vae(vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5,
     total_loss = 0
     total_recon_loss = 0
     total_kld_loss = 0
+    total_correct = 0
+    total_valid_positions = 0
     
     # Sample some examples for visualization
     samples = []
@@ -486,32 +507,40 @@ def evaluate_vae(vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5,
             total_recon_loss += recon_loss.item()
             total_kld_loss += kld_loss.item()
             
+            # Calculate accuracy
+            pred_blocks = torch.argmax(reconstructed, dim=-1)
+            correct = (pred_blocks == blocks) & (mask.bool())
+            total_correct += correct.sum().item()
+            total_valid_positions += mask.sum().item()
+            
             # Store samples for visualization
             if i < num_samples:
-                # Get the most likely block for each position
-                pred_blocks = torch.argmax(reconstructed, dim=-1)
-                
                 samples.append({
                     'input': blocks[0].cpu(),
                     'mask': mask[0].cpu(),
                     'reconstructed': pred_blocks[0].cpu()
                 })
     
-    # Calculate average losses
+    # Calculate average losses and accuracy
     avg_loss = total_loss / len(dataloader)
     avg_recon_loss = total_recon_loss / len(dataloader)
     avg_kld_loss = total_kld_loss / len(dataloader)
+    accuracy = total_correct / total_valid_positions if total_valid_positions > 0 else 0
     
     if verbose:
         print(f"Evaluation:")
         print(f"  Loss: {avg_loss:.4f}")
         print(f"  Reconstruction Loss: {avg_recon_loss:.4f}")
         print(f"  KLD Loss: {avg_kld_loss:.4f}")
+        print(f"  Accuracy: {accuracy:.4f} ({total_correct}/{total_valid_positions})")
     
     return {
         'loss': avg_loss,
         'recon_loss': avg_recon_loss,
         'kld_loss': avg_kld_loss,
+        'accuracy': accuracy,
+        'correct': total_correct,
+        'total': total_valid_positions,
         'samples': samples
     }
 
