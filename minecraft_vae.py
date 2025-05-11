@@ -310,20 +310,29 @@ class MinecraftVAE(nn.Module):
         return torch.stack(interpolated)
 
 
-def calculate_class_weights(dataloader, num_classes, device="cuda"):
+def calculate_class_weights(dataloader, num_classes, device="cuda", method="effective_samples", beta=0.9999):
     """
     Calculate class weights based on frequency in the dataset.
     Rare classes get higher weights, common classes get lower weights.
+    
+    Several methods are available to prevent extremely low weights for common classes:
+    - 'inverse': Standard inverse frequency (1/count)
+    - 'log': Log-based weighting (log(N/count))
+    - 'sqrt': Square root weighting (sqrt(N/count))
+    - 'effective_samples': Based on effective number of samples (1-beta)/(1-beta^count)
+    - 'balanced': Balanced approach that ensures no class gets zero weight
 
     Args:
         dataloader (DataLoader): DataLoader for the training data
         num_classes (int): Number of block types
         device (str): Device to use
+        method (str): Method to calculate weights ('inverse', 'log', 'sqrt', 'effective_samples', 'balanced')
+        beta (float): Parameter for effective number of samples method (0.9-0.999)
 
     Returns:
         torch.Tensor: Class weights tensor
     """
-    print("Calculating class weights...")
+    print(f"Calculating class weights using '{method}' method...")
     # Initialize class counts
     class_counts = torch.zeros(num_classes, device=device)
 
@@ -341,11 +350,38 @@ def calculate_class_weights(dataloader, num_classes, device="cuda"):
         )
         class_counts += class_histogram
 
-    # Calculate weights (inverse of frequency)
-    # Add a small epsilon to avoid division by zero
-    epsilon = 1e-6
-    class_weights = 1.0 / (class_counts + epsilon)
-
+    # Calculate weights based on the selected method
+    epsilon = 1e-6  # Small value to avoid division by zero
+    total_samples = class_counts.sum()
+    
+    if method == 'inverse':
+        # Standard inverse frequency (with minimum threshold to avoid too small weights)
+        min_weight_threshold = 0.01
+        class_weights = 1.0 / (class_counts + epsilon)
+        class_weights = torch.clamp(class_weights, min=min_weight_threshold)
+    
+    elif method == 'log':
+        # Log-based weighting
+        class_weights = torch.log(total_samples / (class_counts + epsilon) + 1.0)
+    
+    elif method == 'sqrt':
+        # Square root weighting
+        class_weights = torch.sqrt(total_samples / (class_counts + epsilon))
+    
+    elif method == 'effective_samples':
+        # Based on "Class-Balanced Loss Based on Effective Number of Samples"
+        # Formula: (1-beta)/(1-beta^n)
+        class_weights = (1.0 - beta) / (1.0 - torch.pow(beta, class_counts + epsilon))
+    
+    else:  # 'balanced' (default fallback)
+        # Balanced approach that ensures no class gets zero weight
+        # Uses a combination of inverse frequency and minimum threshold
+        class_weights = total_samples / (class_counts * num_classes + epsilon)
+        # Ensure minimum weight is at least 10% of the maximum weight
+        max_weight = class_weights.max()
+        min_weight = max_weight * 0.1
+        class_weights = torch.clamp(class_weights, min=min_weight)
+    
     # Normalize weights to sum to num_classes
     class_weights = class_weights * (num_classes / class_weights.sum())
 
@@ -364,7 +400,10 @@ def calculate_class_weights(dataloader, num_classes, device="cuda"):
         print(
             f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}"
         )
-
+    
+    # Visualize class weights distribution
+    plot_class_weights(class_weights, class_counts)
+    
     return class_weights
 
 
@@ -427,6 +466,155 @@ def vae_loss_function(
     return total_loss, recon_loss, kld_loss
 
 
+def compare_weighting_methods(dataloader, num_classes, device="cuda"):
+    """
+    Compare different class weighting methods and visualize their effects.
+    
+    Args:
+        dataloader (DataLoader): DataLoader for the training data
+        num_classes (int): Number of block types
+        device (str): Device to use
+    
+    Returns:
+        dict: Dictionary of class weights for each method
+    """
+    print("Comparing different class weighting methods...")
+    
+    # Initialize class counts
+    class_counts = torch.zeros(num_classes, device=device)
+    
+    # Count occurrences of each class
+    for batch in tqdm(dataloader, desc="Counting block types"):
+        blocks = batch["blocks"].to(device)
+        mask = batch["mask"].to(device)
+        valid_blocks = blocks[mask.bool()]
+        class_histogram = torch.histc(
+            valid_blocks.float(), bins=num_classes, min=0, max=num_classes - 1
+        )
+        class_counts += class_histogram
+    
+    # Calculate weights using different methods
+    methods = ['inverse', 'log', 'sqrt', 'effective_samples', 'balanced']
+    weights_dict = {}
+    
+    epsilon = 1e-6
+    total_samples = class_counts.sum()
+    
+    # Standard inverse frequency
+    weights = 1.0 / (class_counts + epsilon)
+    weights = weights * (num_classes / weights.sum())
+    weights_dict['inverse'] = weights
+    
+    # Log-based weighting
+    weights = torch.log(total_samples / (class_counts + epsilon) + 1.0)
+    weights = weights * (num_classes / weights.sum())
+    weights_dict['log'] = weights
+    
+    # Square root weighting
+    weights = torch.sqrt(total_samples / (class_counts + epsilon))
+    weights = weights * (num_classes / weights.sum())
+    weights_dict['sqrt'] = weights
+    
+    # Effective number of samples (beta=0.9999)
+    beta = 0.9999
+    weights = (1.0 - beta) / (1.0 - torch.pow(beta, class_counts + epsilon))
+    weights = weights * (num_classes / weights.sum())
+    weights_dict['effective_samples'] = weights
+    
+    # Balanced approach
+    weights = total_samples / (class_counts * num_classes + epsilon)
+    max_weight = weights.max()
+    min_weight = max_weight * 0.1
+    weights = torch.clamp(weights, min=min_weight)
+    weights = weights * (num_classes / weights.sum())
+    weights_dict['balanced'] = weights
+    
+    # Create visualization
+    plt.figure(figsize=(15, 10))
+    
+    # Get indices of top classes by count
+    top_indices = torch.argsort(class_counts, descending=True)[:20].cpu().numpy()
+    
+    # Plot class counts
+    plt.subplot(2, 1, 1)
+    plt.bar(range(len(top_indices)), class_counts[top_indices].cpu().numpy())
+    plt.yscale('log')
+    plt.title('Class Distribution (Top 20 Classes)')
+    plt.xlabel('Class Index')
+    plt.ylabel('Count (log scale)')
+    plt.xticks(range(len(top_indices)), [str(idx) for idx in top_indices], rotation=90)
+    
+    # Plot weights from different methods
+    plt.subplot(2, 1, 2)
+    x = np.arange(len(top_indices))
+    width = 0.15
+    offsets = [-2, -1, 0, 1, 2]
+    
+    for i, (method, offset) in enumerate(zip(methods, offsets)):
+        plt.bar(x + offset * width, weights_dict[method][top_indices].cpu().numpy(), 
+                width=width, label=method)
+    
+    plt.title('Class Weights Comparison')
+    plt.xlabel('Class Index')
+    plt.ylabel('Weight')
+    plt.xticks(range(len(top_indices)), [str(idx) for idx in top_indices], rotation=90)
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig('class_weights_comparison.png')
+    plt.close()
+    print("Class weights comparison saved to 'class_weights_comparison.png'")
+    
+    return weights_dict
+
+
+def plot_class_weights(class_weights, class_counts, num_to_show=20):
+    """
+    Visualize the class weights distribution.
+    
+    Args:
+        class_weights (torch.Tensor): Class weights tensor
+        class_counts (torch.Tensor): Class counts tensor
+        num_to_show (int): Number of classes to show in the plot
+    """
+    # Move tensors to CPU for plotting
+    weights = class_weights.cpu().numpy()
+    counts = class_counts.cpu().numpy()
+    
+    # Get indices of top classes by count
+    top_indices = np.argsort(counts)[::-1][:num_to_show]
+    
+    # Extract data for these classes
+    selected_weights = weights[top_indices]
+    selected_counts = counts[top_indices]
+    selected_indices = top_indices
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+    
+    # Plot class counts (log scale)
+    ax1.bar(range(num_to_show), selected_counts)
+    ax1.set_yscale('log')
+    ax1.set_xlabel('Block ID Index')
+    ax1.set_ylabel('Count (log scale)')
+    ax1.set_title('Class Distribution (Top Classes)')
+    ax1.set_xticks(range(num_to_show))
+    ax1.set_xticklabels([str(idx) for idx in selected_indices], rotation=90)
+    
+    # Plot class weights
+    ax2.bar(range(num_to_show), selected_weights)
+    ax2.set_xlabel('Block ID Index')
+    ax2.set_ylabel('Weight')
+    ax2.set_title('Class Weights')
+    ax2.set_xticks(range(num_to_show))
+    ax2.set_xticklabels([str(idx) for idx in selected_indices], rotation=90)
+    
+    plt.tight_layout()
+    plt.savefig('class_weights_distribution.png')
+    plt.close()
+    print("Class weights visualization saved to 'class_weights_distribution.png'")
+
+
 def plot_lr_schedule(scheduler, num_steps):
     """
     Visualize the learning rate schedule.
@@ -472,6 +660,7 @@ def train_vae(
     kld_weight=0.01,
     use_class_weights=False,
     scheduler=None,
+    args=None,  # Command-line arguments
 ):
     """
     Train the VAE.
@@ -486,6 +675,7 @@ def train_vae(
         kld_weight (float): Weight for the KL divergence term
         use_class_weights (bool): Whether to use class weights to handle imbalance
         scheduler (torch.optim.lr_scheduler._LRScheduler, optional): Learning rate scheduler
+        args (argparse.Namespace, optional): Command-line arguments containing weight_method and beta
 
     Returns:
         list: Training losses
@@ -495,7 +685,14 @@ def train_vae(
     # Calculate class weights if needed
     class_weights = None
     if use_class_weights:
-        class_weights = calculate_class_weights(dataloader, vae.num_blocks, device)
+        # Use the method specified by command-line arguments or the default
+        class_weights = calculate_class_weights(
+            dataloader, 
+            vae.num_blocks, 
+            device,
+            method=args.weight_method,  # From command-line arguments
+            beta=args.beta  # From command-line arguments
+        )
 
     for epoch in range(epochs):
         # Training phase
@@ -764,6 +961,25 @@ def load_vae(filename, vae, optimizer=None):
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Train a VAE for Minecraft structures")
+    parser.add_argument(
+        "--weight-method", 
+        type=str, 
+        default="effective_samples",
+        choices=["inverse", "log", "sqrt", "effective_samples", "balanced"],
+        help="Method to calculate class weights (default: effective_samples)"
+    )
+    parser.add_argument(
+        "--beta", 
+        type=float, 
+        default=0.9999,
+        help="Beta parameter for effective_samples method (default: 0.9999)"
+    )
+    args = parser.parse_args()
+    
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -808,6 +1024,11 @@ if __name__ == "__main__":
     # Create optimizer
     optimizer = torch.optim.AdamW(vae.parameters(), lr=1e-3)
 
+    # Compare different class weighting methods to help choose the best one
+    print("\nComparing different class weighting methods...")
+    compare_weighting_methods(train_dataloader, vae.num_blocks, device)
+    print("You can examine 'class_weights_comparison.png' to choose the best method")
+    
     # Create CyclicLR scheduler
     # Using triangular2 mode which reduces the amplitude by half each cycle
     # This is often more performant for neural networks
@@ -822,14 +1043,14 @@ if __name__ == "__main__":
     )
 
     # Visualize the learning rate schedule for one cycle
-    print("Generating learning rate schedule visualization...")
+    print("\nGenerating learning rate schedule visualization...")
     plot_lr_schedule(scheduler, step_size_up * 2)  # Plot for one complete cycle
     print("Learning rate schedule visualization saved to 'cyclic_lr_schedule.png'")
 
     # Train the VAE
     losses = train_vae(
         vae=vae,
-        # use_class_weights=True,
+        use_class_weights=True,  # Enable class weights with our improved weighting method
         dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         optimizer=optimizer,
@@ -837,6 +1058,7 @@ if __name__ == "__main__":
         epochs=100,
         kld_weight=0.01,
         scheduler=scheduler,
+        args=args,  # Pass command-line arguments
     )
 
     # Evaluate the VAE
