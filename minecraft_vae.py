@@ -296,7 +296,59 @@ class MinecraftVAE(nn.Module):
         return torch.stack(interpolated)
 
 
-def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=0.01):
+def calculate_class_weights(dataloader, num_classes, device="cuda"):
+    """
+    Calculate class weights based on frequency in the dataset.
+    Rare classes get higher weights, common classes get lower weights.
+    
+    Args:
+        dataloader (DataLoader): DataLoader for the training data
+        num_classes (int): Number of block types
+        device (str): Device to use
+        
+    Returns:
+        torch.Tensor: Class weights tensor
+    """
+    print("Calculating class weights...")
+    # Initialize class counts
+    class_counts = torch.zeros(num_classes, device=device)
+    
+    # Count occurrences of each class
+    for batch in tqdm(dataloader, desc="Counting block types"):
+        blocks = batch['blocks'].to(device)
+        mask = batch['mask'].to(device)
+        
+        # Only count blocks where mask is 1
+        valid_blocks = blocks[mask.bool()]
+        
+        # Update counts using histogram
+        class_histogram = torch.histc(valid_blocks.float(), bins=num_classes, min=0, max=num_classes-1)
+        class_counts += class_histogram
+    
+    # Calculate weights (inverse of frequency)
+    # Add a small epsilon to avoid division by zero
+    epsilon = 1e-6
+    class_weights = 1.0 / (class_counts + epsilon)
+    
+    # Normalize weights to sum to num_classes
+    class_weights = class_weights * (num_classes / class_weights.sum())
+    
+    # Print the top 5 most common and top 5 rarest blocks
+    sorted_indices = torch.argsort(class_counts, descending=True)
+    print("\nTop 5 most common blocks (lower weight):")
+    for i in range(min(5, num_classes)):
+        idx = sorted_indices[i].item()
+        print(f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}")
+    
+    print("\nTop 5 rarest blocks (higher weight):")
+    for i in range(min(5, num_classes)):
+        idx = sorted_indices[-(i+1)].item()
+        print(f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}")
+    
+    return class_weights
+
+
+def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=0.01, class_weights=None):
     """
     VAE loss function.
     
@@ -307,6 +359,7 @@ def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=
         log_var (torch.Tensor): Log variance of the latent Gaussian
         mask (torch.Tensor, optional): Mask tensor
         kld_weight (float): Weight for the KL divergence term
+        class_weights (torch.Tensor, optional): Weights for each class to handle imbalance
         
     Returns:
         tuple: (total_loss, reconstruction_loss, kld_loss)
@@ -314,11 +367,21 @@ def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=
     # Reconstruction loss (cross-entropy)
     # reconstructed shape: (batch_size, chunk_size, chunk_size, chunk_size, num_blocks)
     # target shape: (batch_size, chunk_size, chunk_size, chunk_size)
-    recon_loss = F.cross_entropy(
-        reconstructed.reshape(-1, reconstructed.size(-1)),
-        target.reshape(-1),
-        reduction='none'
-    )
+    if class_weights is not None:
+        # Use weighted cross-entropy loss
+        recon_loss = F.cross_entropy(
+            reconstructed.reshape(-1, reconstructed.size(-1)),
+            target.reshape(-1),
+            weight=class_weights,
+            reduction='none'
+        )
+    else:
+        # Use standard cross-entropy loss
+        recon_loss = F.cross_entropy(
+            reconstructed.reshape(-1, reconstructed.size(-1)),
+            target.reshape(-1),
+            reduction='none'
+        )
     
     # Apply mask if provided
     if mask is not None:
@@ -342,7 +405,7 @@ def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=
     return total_loss, recon_loss, kld_loss
 
 
-def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", epochs=10, kld_weight=0.01):
+def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", epochs=10, kld_weight=0.01, use_class_weights=False):
     """
     Train the VAE.
     
@@ -354,11 +417,17 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
         device (str): Device to use
         epochs (int): Number of epochs
         kld_weight (float): Weight for the KL divergence term
+        use_class_weights (bool): Whether to use class weights to handle imbalance
         
     Returns:
         list: Training losses
     """
     losses = []
+    
+    # Calculate class weights if needed
+    class_weights = None
+    if use_class_weights:
+        class_weights = calculate_class_weights(dataloader, vae.num_blocks, device)
     
     for epoch in range(epochs):
         # Training phase
@@ -380,7 +449,7 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
             
             # Calculate loss
             loss, recon_loss, kld_loss = vae_loss_function(
-                reconstructed, blocks, mu, log_var, mask, kld_weight
+                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights
             )
             
             # Backward pass
@@ -431,7 +500,8 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
                 device=device,
                 kld_weight=kld_weight,
                 num_samples=0,  # Don't need samples during training
-                verbose=False
+                verbose=False,
+                class_weights=class_weights
             )
             
             # Print validation results
@@ -463,7 +533,7 @@ def train_vae(vae, dataloader, optimizer, val_dataloader=None, device="cuda", ep
     return losses
 
 
-def evaluate_vae(vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5, verbose=True):
+def evaluate_vae(vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5, verbose=True, class_weights=None):
     """
     Evaluate the VAE on a validation set.
     
@@ -474,6 +544,7 @@ def evaluate_vae(vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5,
         kld_weight (float): Weight for the KL divergence term
         num_samples (int): Number of samples to visualize
         verbose (bool): Whether to print evaluation results
+        class_weights (torch.Tensor, optional): Weights for each class to handle imbalance
         
     Returns:
         dict: Evaluation metrics
@@ -499,7 +570,7 @@ def evaluate_vae(vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5,
             
             # Calculate loss
             loss, recon_loss, kld_loss = vae_loss_function(
-                reconstructed, blocks, mu, log_var, mask, kld_weight
+                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights
             )
             
             # Update totals
