@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import CyclicLR
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -435,6 +436,7 @@ def train_vae(
     epochs=10,
     kld_weight=0.01,
     use_class_weights=False,
+    scheduler=None,
 ):
     """
     Train the VAE.
@@ -448,6 +450,7 @@ def train_vae(
         epochs (int): Number of epochs
         kld_weight (float): Weight for the KL divergence term
         use_class_weights (bool): Whether to use class weights to handle imbalance
+        scheduler (torch.optim.lr_scheduler._LRScheduler, optional): Learning rate scheduler
 
     Returns:
         list: Training losses
@@ -486,6 +489,10 @@ def train_vae(
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
+            # Step the scheduler if provided
+            if scheduler is not None:
+                scheduler.step()
 
             # Calculate accuracy
             with torch.no_grad():
@@ -506,14 +513,18 @@ def train_vae(
                 else 0
             )
 
-            progress_bar.set_postfix(
-                {
-                    "loss": epoch_loss / (progress_bar.n + 1),
-                    "recon_loss": epoch_recon_loss / (progress_bar.n + 1),
-                    "kld_loss": epoch_kld_loss / (progress_bar.n + 1),
-                    "acc": current_accuracy,
-                }
-            )
+            # Include current learning rate in progress bar if scheduler is used
+            postfix_dict = {
+                "loss": epoch_loss / (progress_bar.n + 1),
+                "recon_loss": epoch_recon_loss / (progress_bar.n + 1),
+                "kld_loss": epoch_kld_loss / (progress_bar.n + 1),
+                "acc": current_accuracy,
+            }
+            
+            if scheduler is not None:
+                postfix_dict["lr"] = scheduler.get_last_lr()[0]
+                
+            progress_bar.set_postfix(postfix_dict)
 
         # Calculate average losses and accuracy
         avg_loss = epoch_loss / len(dataloader)
@@ -577,6 +588,33 @@ def train_vae(
             )
 
     return losses
+
+
+def plot_lr_schedule(scheduler, num_iterations):
+    """
+    Plot the learning rate schedule for visualization.
+    
+    Args:
+        scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler
+        num_iterations (int): Number of iterations to plot
+    """
+    lrs = []
+    for _ in range(num_iterations):
+        lrs.append(scheduler.get_last_lr()[0])
+        scheduler.step()
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(lrs)
+    plt.xlabel('Iterations')
+    plt.ylabel('Learning Rate')
+    plt.title('CyclicLR Schedule')
+    plt.grid(True)
+    plt.savefig('cyclic_lr_schedule.png')
+    plt.close()
+    
+    # Reset scheduler
+    scheduler.last_epoch = -1
+    scheduler.step()
 
 
 def evaluate_vae(
@@ -760,6 +798,24 @@ if __name__ == "__main__":
 
     # Create optimizer
     optimizer = torch.optim.Adam(vae.parameters(), lr=1e-3)
+    
+    # Create CyclicLR scheduler
+    # Using triangular2 mode which reduces the amplitude by half each cycle
+    # This is often more performant for neural networks
+    step_size_up = len(train_dataloader) * 2  # Size of one cycle = 2 epochs
+    scheduler = CyclicLR(
+        optimizer,
+        base_lr=1e-4,  # Lower learning rate boundary
+        max_lr=5e-3,   # Upper learning rate boundary
+        step_size_up=step_size_up,
+        mode='triangular2',  # Triangular cycle with amplitude halved each time
+        cycle_momentum=False  # Adam doesn't use momentum
+    )
+    
+    # Visualize the learning rate schedule for one cycle
+    print("Generating learning rate schedule visualization...")
+    plot_lr_schedule(scheduler, step_size_up * 2)  # Plot for one complete cycle
+    print("Learning rate schedule visualization saved to 'cyclic_lr_schedule.png'")
 
     # Train the VAE
     losses = train_vae(
@@ -767,6 +823,7 @@ if __name__ == "__main__":
         dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         optimizer=optimizer,
+        scheduler=scheduler,
         device=device,
         epochs=10,
         kld_weight=0.01,
