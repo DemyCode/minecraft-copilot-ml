@@ -427,6 +427,41 @@ def vae_loss_function(
     return total_loss, recon_loss, kld_loss
 
 
+def plot_lr_schedule(scheduler, num_steps):
+    """
+    Visualize the learning rate schedule.
+    
+    Args:
+        scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler
+        num_steps (int): Number of steps to visualize
+    """
+    # Store original LR
+    original_lrs = []
+    for param_group in scheduler.optimizer.param_groups:
+        original_lrs.append(param_group['lr'])
+    
+    # Get learning rates for each step
+    lrs = []
+    for i in range(num_steps):
+        lrs.append(scheduler.get_last_lr()[0])
+        scheduler.step()
+    
+    # Reset scheduler and optimizer to original state
+    for i, param_group in enumerate(scheduler.optimizer.param_groups):
+        param_group['lr'] = original_lrs[i]
+    scheduler.base_lrs = [original_lrs[0]]  # Reset base_lrs
+    
+    # Plot learning rates
+    plt.figure(figsize=(10, 5))
+    plt.plot(lrs)
+    plt.xlabel('Step')
+    plt.ylabel('Learning Rate')
+    plt.title('CyclicLR Schedule')
+    plt.grid(True)
+    plt.savefig('cyclic_lr_schedule.png')
+    plt.close()
+
+
 def train_vae(
     vae,
     dataloader,
@@ -488,11 +523,15 @@ def train_vae(
             # Backward pass
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
             optimizer.step()
             
             # Step the scheduler if provided
             if scheduler is not None:
                 scheduler.step()
+                # Update progress bar to show current learning rate
+                current_lr = scheduler.get_last_lr()[0]
+                progress_bar.set_postfix({"loss": f"{loss.item():.4f}", "lr": f"{current_lr:.6f}"})
 
             # Calculate accuracy
             with torch.no_grad():
@@ -513,18 +552,14 @@ def train_vae(
                 else 0
             )
 
-            # Include current learning rate in progress bar if scheduler is used
-            postfix_dict = {
-                "loss": epoch_loss / (progress_bar.n + 1),
-                "recon_loss": epoch_recon_loss / (progress_bar.n + 1),
-                "kld_loss": epoch_kld_loss / (progress_bar.n + 1),
-                "acc": current_accuracy,
-            }
-            
-            if scheduler is not None:
-                postfix_dict["lr"] = scheduler.get_last_lr()[0]
-                
-            progress_bar.set_postfix(postfix_dict)
+            progress_bar.set_postfix(
+                {
+                    "loss": epoch_loss / (progress_bar.n + 1),
+                    "recon_loss": epoch_recon_loss / (progress_bar.n + 1),
+                    "kld_loss": epoch_kld_loss / (progress_bar.n + 1),
+                    "acc": current_accuracy,
+                }
+            )
 
         # Calculate average losses and accuracy
         avg_loss = epoch_loss / len(dataloader)
@@ -588,33 +623,6 @@ def train_vae(
             )
 
     return losses
-
-
-def plot_lr_schedule(scheduler, num_iterations):
-    """
-    Plot the learning rate schedule for visualization.
-    
-    Args:
-        scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler
-        num_iterations (int): Number of iterations to plot
-    """
-    lrs = []
-    for _ in range(num_iterations):
-        lrs.append(scheduler.get_last_lr()[0])
-        scheduler.step()
-    
-    plt.figure(figsize=(10, 5))
-    plt.plot(lrs)
-    plt.xlabel('Iterations')
-    plt.ylabel('Learning Rate')
-    plt.title('CyclicLR Schedule')
-    plt.grid(True)
-    plt.savefig('cyclic_lr_schedule.png')
-    plt.close()
-    
-    # Reset scheduler
-    scheduler.last_epoch = -1
-    scheduler.step()
 
 
 def evaluate_vae(
@@ -770,6 +778,7 @@ if __name__ == "__main__":
         chunk_size=16,
         cache_file="cache/block_mappings.pkl",
         max_files=None,  # Use all files
+        # preload=True,
     )
 
     # Split into train and validation sets
@@ -781,10 +790,10 @@ if __name__ == "__main__":
 
     # Create DataLoaders
     train_dataloader = DataLoader(
-        train_dataset, batch_size=32, shuffle=True, num_workers=8
+        train_dataset, batch_size=64, shuffle=True, num_workers=8, pin_memory=True
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=32, shuffle=False, num_workers=8
+        val_dataset, batch_size=64, shuffle=False, num_workers=8, pin_memory=True
     )
 
     # Create the VAE
@@ -797,8 +806,8 @@ if __name__ == "__main__":
     ).to(device)
 
     # Create optimizer
-    optimizer = torch.optim.Adam(vae.parameters(), lr=1e-3)
-    
+    optimizer = torch.optim.AdamW(vae.parameters(), lr=1e-3)
+
     # Create CyclicLR scheduler
     # Using triangular2 mode which reduces the amplitude by half each cycle
     # This is often more performant for neural networks
@@ -809,9 +818,9 @@ if __name__ == "__main__":
         max_lr=5e-3,   # Upper learning rate boundary
         step_size_up=step_size_up,
         mode='triangular2',  # Triangular cycle with amplitude halved each time
-        cycle_momentum=False  # Adam doesn't use momentum
+        cycle_momentum=False  # AdamW doesn't use momentum
     )
-    
+
     # Visualize the learning rate schedule for one cycle
     print("Generating learning rate schedule visualization...")
     plot_lr_schedule(scheduler, step_size_up * 2)  # Plot for one complete cycle
@@ -820,13 +829,14 @@ if __name__ == "__main__":
     # Train the VAE
     losses = train_vae(
         vae=vae,
+        # use_class_weights=True,
         dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         optimizer=optimizer,
-        scheduler=scheduler,
         device=device,
-        epochs=10,
+        epochs=100,
         kld_weight=0.01,
+        scheduler=scheduler,
     )
 
     # Evaluate the VAE
