@@ -313,55 +313,63 @@ def calculate_class_weights(dataloader, num_classes, device="cuda"):
     """
     Calculate class weights based on frequency in the dataset.
     Rare classes get higher weights, common classes get lower weights.
-    
+
     Args:
         dataloader (DataLoader): DataLoader for the training data
         num_classes (int): Number of block types
         device (str): Device to use
-        
+
     Returns:
         torch.Tensor: Class weights tensor
     """
     print("Calculating class weights...")
     # Initialize class counts
     class_counts = torch.zeros(num_classes, device=device)
-    
+
     # Count occurrences of each class
     for batch in tqdm(dataloader, desc="Counting block types"):
-        blocks = batch['blocks'].to(device)
-        mask = batch['mask'].to(device)
-        
+        blocks = batch["blocks"].to(device)
+        mask = batch["mask"].to(device)
+
         # Only count blocks where mask is 1
         valid_blocks = blocks[mask.bool()]
-        
+
         # Update counts using histogram
-        class_histogram = torch.histc(valid_blocks.float(), bins=num_classes, min=0, max=num_classes-1)
+        class_histogram = torch.histc(
+            valid_blocks.float(), bins=num_classes, min=0, max=num_classes - 1
+        )
         class_counts += class_histogram
-    
+
     # Calculate weights (inverse of frequency)
     # Add a small epsilon to avoid division by zero
     epsilon = 1e-6
     class_weights = 1.0 / (class_counts + epsilon)
-    
+
     # Normalize weights to sum to num_classes
     class_weights = class_weights * (num_classes / class_weights.sum())
-    
+
     # Print the top 5 most common and top 5 rarest blocks
     sorted_indices = torch.argsort(class_counts, descending=True)
     print("\nTop 5 most common blocks (lower weight):")
     for i in range(min(5, num_classes)):
         idx = sorted_indices[i].item()
-        print(f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}")
-    
+        print(
+            f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}"
+        )
+
     print("\nTop 5 rarest blocks (higher weight):")
     for i in range(min(5, num_classes)):
-        idx = sorted_indices[-(i+1)].item()
-        print(f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}")
-    
+        idx = sorted_indices[-(i + 1)].item()
+        print(
+            f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}"
+        )
+
     return class_weights
 
 
-def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=0.01, class_weights=None):
+def vae_loss_function(
+    reconstructed, target, mu, log_var, mask=None, kld_weight=0.01, class_weights=None
+):
     """
     VAE loss function.
 
@@ -373,7 +381,7 @@ def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=
         mask (torch.Tensor, optional): Mask tensor
         kld_weight (float): Weight for the KL divergence term
         class_weights (torch.Tensor, optional): Weights for each class to handle imbalance
-        
+
     Returns:
         tuple: (total_loss, reconstruction_loss, kld_loss)
     """
@@ -386,16 +394,16 @@ def vae_loss_function(reconstructed, target, mu, log_var, mask=None, kld_weight=
             reconstructed.reshape(-1, reconstructed.size(-1)),
             target.reshape(-1),
             weight=class_weights,
-            reduction='none'
+            reduction="none",
         )
     else:
         # Use standard cross-entropy loss
         recon_loss = F.cross_entropy(
             reconstructed.reshape(-1, reconstructed.size(-1)),
             target.reshape(-1),
-            reduction='none'
+            reduction="none",
         )
-    
+
     # Apply mask if provided
     if mask is not None:
         # Reshape mask to match recon_loss
@@ -440,17 +448,17 @@ def train_vae(
         epochs (int): Number of epochs
         kld_weight (float): Weight for the KL divergence term
         use_class_weights (bool): Whether to use class weights to handle imbalance
-        
+
     Returns:
         list: Training losses
     """
     losses = []
-    
+
     # Calculate class weights if needed
     class_weights = None
     if use_class_weights:
         class_weights = calculate_class_weights(dataloader, vae.num_blocks, device)
-    
+
     for epoch in range(epochs):
         # Training phase
         vae.train()
@@ -533,7 +541,7 @@ def train_vae(
                 kld_weight=kld_weight,
                 num_samples=0,  # Don't need samples during training
                 verbose=False,
-                class_weights=class_weights
+                class_weights=class_weights,
             )
 
             # Print validation results
@@ -572,7 +580,13 @@ def train_vae(
 
 
 def evaluate_vae(
-    vae, dataloader, device="cuda", kld_weight=0.01, num_samples=5, verbose=True, class_weights=None
+    vae,
+    dataloader,
+    device="cuda",
+    kld_weight=0.01,
+    num_samples=5,
+    verbose=True,
+    class_weights=None,
 ):
     """
     Evaluate the VAE on a validation set.
@@ -729,10 +743,10 @@ if __name__ == "__main__":
 
     # Create DataLoaders
     train_dataloader = DataLoader(
-        train_dataset, batch_size=32, shuffle=True, num_workers=4
+        train_dataset, batch_size=32, shuffle=True, num_workers=8
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=32, shuffle=False, num_workers=4
+        val_dataset, batch_size=32, shuffle=False, num_workers=8
     )
 
     # Create the VAE
@@ -770,4 +784,3 @@ if __name__ == "__main__":
     print("Generating samples...")
     samples = vae.sample(num_samples=5, device=device)
     print(f"Generated {len(samples)} samples of shape {samples.shape}")
-
