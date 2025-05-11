@@ -374,13 +374,33 @@ def count_blocks_parallel(dataloader, num_classes, device="cuda", cache_file=Non
     num_processes = min(mp.cpu_count(), 8)  # Limit to 8 processes max
     print(f"Using {num_processes} processes for parallel counting")
     
+    # Create a progress bar for the batches
+    pbar = tqdm(total=len(batches), desc="Counting block types")
+    
+    def update_pbar(*args):
+        """Callback function to update progress bar"""
+        pbar.update()
+    
+    # Process batches in parallel with callback for progress updates
+    results = []
     with mp.Pool(processes=num_processes) as pool:
-        # Process batches in parallel
-        results = list(tqdm(
-            pool.imap(count_blocks_in_batch, batches),
-            total=len(batches),
-            desc="Counting block types"
-        ))
+        for batch in batches:
+            # Use apply_async with callback to update progress bar
+            results.append(pool.apply_async(
+                count_blocks_in_batch, 
+                args=(batch,),
+                callback=update_pbar
+            ))
+        
+        # Wait for all processes to complete
+        pool.close()
+        pool.join()
+    
+    # Close progress bar
+    pbar.close()
+    
+    # Get actual results from AsyncResult objects
+    results = [r.get() for r in results]
     
     # Combine results
     class_counts = torch.zeros(num_classes)
