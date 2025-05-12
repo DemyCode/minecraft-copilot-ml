@@ -128,7 +128,9 @@ class MinecraftVAE(nn.Module):
         self.decoder = nn.Sequential(*decoder_layers)
 
         # Output layer to predict block types
-        self.block_predictor = nn.Conv3d(embedding_dim, num_blocks, kernel_size=1)
+        self.block_predictor = nn.Sequential(
+            nn.Conv3d(embedding_dim, num_blocks, kernel_size=1), nn.Sigmoid()
+        )
 
     def encode(self, x, mask=None):
         """
@@ -314,54 +316,58 @@ def count_blocks_in_batch(batch_data):
     """
     Count block occurrences in a single batch.
     This function is designed to be used with multiprocessing.
-    
+
     Args:
         batch_data (tuple): Tuple containing (blocks, mask, num_classes)
-        
+
     Returns:
         torch.Tensor: Histogram of block counts
     """
     blocks, mask, num_classes = batch_data
     # Only count blocks where mask is 1
     valid_blocks = blocks[mask.bool()]
-    
+
     # Update counts using histogram
     return torch.histc(
         valid_blocks.float(), bins=num_classes, min=0, max=num_classes - 1
     )
 
 
-def count_blocks_parallel(dataloader, num_classes, device="cuda", cache_file=None, force_recount=False):
+def count_blocks_parallel(
+    dataloader, num_classes, device="cuda", cache_file=None, force_recount=False
+):
     """
     Count block occurrences in parallel using multiprocessing.
     Also supports caching results to avoid recounting.
-    
+
     Args:
         dataloader (DataLoader): DataLoader for the training data
         num_classes (int): Number of block types
         device (str): Device to use
         cache_file (str, optional): Path to cache file
         force_recount (bool): Whether to force recounting even if cache exists
-        
+
     Returns:
         torch.Tensor: Tensor of class counts
     """
     import os
     import multiprocessing as mp
     from functools import partial
-    
+
     # Check if cache exists and use it if available
     if cache_file and os.path.exists(cache_file) and not force_recount:
         print(f"Loading block counts from cache: {cache_file}")
         try:
             class_counts = torch.load(cache_file)
-            print(f"Successfully loaded cached block counts with shape: {class_counts.shape}")
+            print(
+                f"Successfully loaded cached block counts with shape: {class_counts.shape}"
+            )
             return class_counts.to(device)
         except Exception as e:
             print(f"Error loading cache: {e}. Will recount blocks.")
-    
+
     print("Counting block occurrences in parallel...")
-    
+
     # Prepare batches for parallel processing
     # Move data to CPU for multiprocessing
     batches = []
@@ -369,62 +375,69 @@ def count_blocks_parallel(dataloader, num_classes, device="cuda", cache_file=Non
         blocks = batch["blocks"].cpu()
         mask = batch["mask"].cpu()
         batches.append((blocks, mask, num_classes))
-    
+
     # Use multiprocessing to count blocks in parallel
     num_processes = min(mp.cpu_count(), 8)  # Limit to 8 processes max
     print(f"Using {num_processes} processes for parallel counting")
-    
+
     # Create a progress bar for the batches
     pbar = tqdm(total=len(batches), desc="Counting block types")
-    
+
     def update_pbar(*args):
         """Callback function to update progress bar"""
         pbar.update()
-    
+
     # Process batches in parallel with callback for progress updates
     results = []
     with mp.Pool(processes=num_processes) as pool:
         for batch in batches:
             # Use apply_async with callback to update progress bar
-            results.append(pool.apply_async(
-                count_blocks_in_batch, 
-                args=(batch,),
-                callback=update_pbar
-            ))
-        
+            results.append(
+                pool.apply_async(
+                    count_blocks_in_batch, args=(batch,), callback=update_pbar
+                )
+            )
+
         # Wait for all processes to complete
         pool.close()
         pool.join()
-    
+
     # Close progress bar
     pbar.close()
-    
+
     # Get actual results from AsyncResult objects
     results = [r.get() for r in results]
-    
+
     # Combine results
     class_counts = torch.zeros(num_classes)
     for result in results:
         class_counts += result
-    
+
     # Move to specified device
     class_counts = class_counts.to(device)
-    
+
     # Cache results if cache_file is provided
     if cache_file:
         print(f"Saving block counts to cache: {cache_file}")
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
         torch.save(class_counts.cpu(), cache_file)
-    
+
     return class_counts
 
 
-def calculate_class_weights(dataloader, num_classes, device="cuda", method="effective_samples", beta=0.9999, 
-                           cache_file="cache/block_counts.pt", force_recount=False):
+def calculate_class_weights(
+    dataloader,
+    num_classes,
+    device="cuda",
+    method="effective_samples",
+    beta=0.9999,
+    cache_file="cache/block_counts.pt",
+    force_recount=False,
+):
     """
     Calculate class weights based on frequency in the dataset.
     Rare classes get higher weights, common classes get lower weights.
-    
+
     Several methods are available to prevent extremely low weights for common classes:
     - 'inverse': Standard inverse frequency (1/count)
     - 'log': Log-based weighting (log(N/count))
@@ -445,39 +458,39 @@ def calculate_class_weights(dataloader, num_classes, device="cuda", method="effe
         torch.Tensor: Class weights tensor
     """
     print(f"Calculating class weights using '{method}' method...")
-    
+
     # Count blocks using parallel processing and caching
     class_counts = count_blocks_parallel(
-        dataloader, 
-        num_classes, 
+        dataloader,
+        num_classes,
         device=device,
         cache_file=cache_file,
-        force_recount=force_recount
+        force_recount=force_recount,
     )
 
     # Calculate weights based on the selected method
     epsilon = 1e-6  # Small value to avoid division by zero
     total_samples = class_counts.sum()
-    
-    if method == 'inverse':
+
+    if method == "inverse":
         # Standard inverse frequency (with minimum threshold to avoid too small weights)
         min_weight_threshold = 0.01
         class_weights = 1.0 / (class_counts + epsilon)
         class_weights = torch.clamp(class_weights, min=min_weight_threshold)
-    
-    elif method == 'log':
+
+    elif method == "log":
         # Log-based weighting
         class_weights = torch.log(total_samples / (class_counts + epsilon) + 1.0)
-    
-    elif method == 'sqrt':
+
+    elif method == "sqrt":
         # Square root weighting
         class_weights = torch.sqrt(total_samples / (class_counts + epsilon))
-    
-    elif method == 'effective_samples':
+
+    elif method == "effective_samples":
         # Based on "Class-Balanced Loss Based on Effective Number of Samples"
         # Formula: (1-beta)/(1-beta^n)
         class_weights = (1.0 - beta) / (1.0 - torch.pow(beta, class_counts + epsilon))
-    
+
     else:  # 'balanced' (default fallback)
         # Balanced approach that ensures no class gets zero weight
         # Uses a combination of inverse frequency and minimum threshold
@@ -486,7 +499,7 @@ def calculate_class_weights(dataloader, num_classes, device="cuda", method="effe
         max_weight = class_weights.max()
         min_weight = max_weight * 0.1
         class_weights = torch.clamp(class_weights, min=min_weight)
-    
+
     # Normalize weights to sum to num_classes
     class_weights = class_weights * (num_classes / class_weights.sum())
 
@@ -505,16 +518,24 @@ def calculate_class_weights(dataloader, num_classes, device="cuda", method="effe
         print(
             f"  Block ID {idx}: count={class_counts[idx]:.0f}, weight={class_weights[idx]:.4f}"
         )
-    
+
     # Visualize class weights distribution
     plot_class_weights(class_weights, class_counts)
-    
+
     return class_weights
 
 
 def vae_loss_function(
-    reconstructed, target, mu, log_var, mask=None, kld_weight=0.01, class_weights=None,
-    use_focal_loss=False, gamma=2.0, alpha=None
+    reconstructed,
+    target,
+    mu,
+    log_var,
+    mask=None,
+    kld_weight=0.01,
+    class_weights=None,
+    use_focal_loss=False,
+    gamma=2.0,
+    alpha=None,
 ):
     """
     VAE loss function with optional focal loss.
@@ -539,33 +560,35 @@ def vae_loss_function(
     # target shape: (batch_size, chunk_size, chunk_size, chunk_size)
     reconstructed_flat = reconstructed.reshape(-1, reconstructed.size(-1))
     target_flat = target.reshape(-1)
-    
+
     if use_focal_loss:
         # Implement focal loss
         # First get the log softmax outputs
         log_probs = F.log_softmax(reconstructed_flat, dim=-1)
-        
+
         # Get the probabilities for the target class
         probs = torch.exp(log_probs)
         target_probs = probs.gather(1, target_flat.unsqueeze(1)).squeeze(1)
-        
+
         # Calculate focal weight: (1 - p_t)^gamma
         focal_weight = (1 - target_probs).pow(gamma)
-        
+
         # Apply class weights if provided (as alpha in focal loss)
         if class_weights is not None:
             # If alpha is not provided, use class_weights as alpha
             if alpha is None:
                 alpha = class_weights
-            
+
             # Get alpha for each target
             alpha_t = alpha.gather(0, target_flat)
-            
+
             # Apply alpha to focal weight
             focal_weight = alpha_t * focal_weight
-        
+
         # Calculate focal loss: -alpha_t * (1 - p_t)^gamma * log(p_t)
-        recon_loss = -focal_weight * log_probs.gather(1, target_flat.unsqueeze(1)).squeeze(1)
+        recon_loss = -focal_weight * log_probs.gather(
+            1, target_flat.unsqueeze(1)
+        ).squeeze(1)
     else:
         # Use standard cross-entropy loss
         if class_weights is not None:
@@ -606,110 +629,120 @@ def vae_loss_function(
     return total_loss, recon_loss, kld_loss
 
 
-def compare_weighting_methods(dataloader, num_classes, device="cuda", cache_file="cache/block_counts.pt", force_recount=False):
+def compare_weighting_methods(
+    dataloader,
+    num_classes,
+    device="cuda",
+    cache_file="cache/block_counts.pt",
+    force_recount=False,
+):
     """
     Compare different class weighting methods and visualize their effects.
-    
+
     Args:
         dataloader (DataLoader): DataLoader for the training data
         num_classes (int): Number of block types
         device (str): Device to use
         cache_file (str): Path to cache file for block counts
         force_recount (bool): Whether to force recounting even if cache exists
-    
+
     Returns:
         dict: Dictionary of class weights for each method
     """
     print("Comparing different class weighting methods...")
-    
+
     # Count blocks using parallel processing and caching
     class_counts = count_blocks_parallel(
-        dataloader, 
-        num_classes, 
+        dataloader,
+        num_classes,
         device=device,
         cache_file=cache_file,
-        force_recount=force_recount
+        force_recount=force_recount,
     )
-    
+
     # Calculate weights using different methods
-    methods = ['inverse', 'log', 'sqrt', 'effective_samples', 'balanced']
+    methods = ["inverse", "log", "sqrt", "effective_samples", "balanced"]
     weights_dict = {}
-    
+
     epsilon = 1e-6
     total_samples = class_counts.sum()
-    
+
     # Standard inverse frequency
     weights = 1.0 / (class_counts + epsilon)
     weights = weights * (num_classes / weights.sum())
-    weights_dict['inverse'] = weights
-    
+    weights_dict["inverse"] = weights
+
     # Log-based weighting
     weights = torch.log(total_samples / (class_counts + epsilon) + 1.0)
     weights = weights * (num_classes / weights.sum())
-    weights_dict['log'] = weights
-    
+    weights_dict["log"] = weights
+
     # Square root weighting
     weights = torch.sqrt(total_samples / (class_counts + epsilon))
     weights = weights * (num_classes / weights.sum())
-    weights_dict['sqrt'] = weights
-    
+    weights_dict["sqrt"] = weights
+
     # Effective number of samples (beta=0.9999)
     beta = 0.9999
     weights = (1.0 - beta) / (1.0 - torch.pow(beta, class_counts + epsilon))
     weights = weights * (num_classes / weights.sum())
-    weights_dict['effective_samples'] = weights
-    
+    weights_dict["effective_samples"] = weights
+
     # Balanced approach
     weights = total_samples / (class_counts * num_classes + epsilon)
     max_weight = weights.max()
     min_weight = max_weight * 0.1
     weights = torch.clamp(weights, min=min_weight)
     weights = weights * (num_classes / weights.sum())
-    weights_dict['balanced'] = weights
-    
+    weights_dict["balanced"] = weights
+
     # Create visualization
     plt.figure(figsize=(15, 10))
-    
+
     # Get indices of top classes by count
     top_indices = torch.argsort(class_counts, descending=True)[:20].cpu().numpy()
-    
+
     # Plot class counts
     plt.subplot(2, 1, 1)
     plt.bar(range(len(top_indices)), class_counts[top_indices].cpu().numpy())
-    plt.yscale('log')
-    plt.title('Class Distribution (Top 20 Classes)')
-    plt.xlabel('Class Index')
-    plt.ylabel('Count (log scale)')
+    plt.yscale("log")
+    plt.title("Class Distribution (Top 20 Classes)")
+    plt.xlabel("Class Index")
+    plt.ylabel("Count (log scale)")
     plt.xticks(range(len(top_indices)), [str(idx) for idx in top_indices], rotation=90)
-    
+
     # Plot weights from different methods
     plt.subplot(2, 1, 2)
     x = np.arange(len(top_indices))
     width = 0.15
     offsets = [-2, -1, 0, 1, 2]
-    
+
     for i, (method, offset) in enumerate(zip(methods, offsets)):
-        plt.bar(x + offset * width, weights_dict[method][top_indices].cpu().numpy(), 
-                width=width, label=method)
-    
-    plt.title('Class Weights Comparison')
-    plt.xlabel('Class Index')
-    plt.ylabel('Weight')
+        plt.bar(
+            x + offset * width,
+            weights_dict[method][top_indices].cpu().numpy(),
+            width=width,
+            label=method,
+        )
+
+    plt.title("Class Weights Comparison")
+    plt.xlabel("Class Index")
+    plt.ylabel("Weight")
     plt.xticks(range(len(top_indices)), [str(idx) for idx in top_indices], rotation=90)
     plt.legend()
-    
+
     plt.tight_layout()
-    plt.savefig('class_weights_comparison.png')
+    plt.savefig("class_weights_comparison.png")
     plt.close()
     print("Class weights comparison saved to 'class_weights_comparison.png'")
-    
+
     return weights_dict
 
 
 def plot_class_weights(class_weights, class_counts, num_to_show=20):
     """
     Visualize the class weights distribution.
-    
+
     Args:
         class_weights (torch.Tensor): Class weights tensor
         class_counts (torch.Tensor): Class counts tensor
@@ -718,37 +751,37 @@ def plot_class_weights(class_weights, class_counts, num_to_show=20):
     # Move tensors to CPU for plotting
     weights = class_weights.cpu().numpy()
     counts = class_counts.cpu().numpy()
-    
+
     # Get indices of top classes by count
     top_indices = np.argsort(counts)[::-1][:num_to_show]
-    
+
     # Extract data for these classes
     selected_weights = weights[top_indices]
     selected_counts = counts[top_indices]
     selected_indices = top_indices
-    
+
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-    
+
     # Plot class counts (log scale)
     ax1.bar(range(num_to_show), selected_counts)
-    ax1.set_yscale('log')
-    ax1.set_xlabel('Block ID Index')
-    ax1.set_ylabel('Count (log scale)')
-    ax1.set_title('Class Distribution (Top Classes)')
+    ax1.set_yscale("log")
+    ax1.set_xlabel("Block ID Index")
+    ax1.set_ylabel("Count (log scale)")
+    ax1.set_title("Class Distribution (Top Classes)")
     ax1.set_xticks(range(num_to_show))
     ax1.set_xticklabels([str(idx) for idx in selected_indices], rotation=90)
-    
+
     # Plot class weights
     ax2.bar(range(num_to_show), selected_weights)
-    ax2.set_xlabel('Block ID Index')
-    ax2.set_ylabel('Weight')
-    ax2.set_title('Class Weights')
+    ax2.set_xlabel("Block ID Index")
+    ax2.set_ylabel("Weight")
+    ax2.set_title("Class Weights")
     ax2.set_xticks(range(num_to_show))
     ax2.set_xticklabels([str(idx) for idx in selected_indices], rotation=90)
-    
+
     plt.tight_layout()
-    plt.savefig('class_weights_distribution.png')
+    plt.savefig("class_weights_distribution.png")
     plt.close()
     print("Class weights visualization saved to 'class_weights_distribution.png'")
 
@@ -756,7 +789,7 @@ def plot_class_weights(class_weights, class_counts, num_to_show=20):
 def plot_lr_schedule(scheduler, num_steps):
     """
     Visualize the learning rate schedule.
-    
+
     Args:
         scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler
         num_steps (int): Number of steps to visualize
@@ -764,27 +797,27 @@ def plot_lr_schedule(scheduler, num_steps):
     # Store original LR
     original_lrs = []
     for param_group in scheduler.optimizer.param_groups:
-        original_lrs.append(param_group['lr'])
-    
+        original_lrs.append(param_group["lr"])
+
     # Get learning rates for each step
     lrs = []
     for i in range(num_steps):
         lrs.append(scheduler.get_last_lr()[0])
         scheduler.step()
-    
+
     # Reset scheduler and optimizer to original state
     for i, param_group in enumerate(scheduler.optimizer.param_groups):
-        param_group['lr'] = original_lrs[i]
+        param_group["lr"] = original_lrs[i]
     scheduler.base_lrs = [original_lrs[0]]  # Reset base_lrs
-    
+
     # Plot learning rates
     plt.figure(figsize=(10, 5))
     plt.plot(lrs)
-    plt.xlabel('Step')
-    plt.ylabel('Learning Rate')
-    plt.title('CyclicLR Schedule')
+    plt.xlabel("Step")
+    plt.ylabel("Learning Rate")
+    plt.title("CyclicLR Schedule")
     plt.grid(True)
-    plt.savefig('cyclic_lr_schedule.png')
+    plt.savefig("cyclic_lr_schedule.png")
     plt.close()
 
 
@@ -830,7 +863,7 @@ def train_vae(
     """
     losses = []
     start_epoch = 0
-    
+
     # Create checkpoint directory if it doesn't exist
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -838,17 +871,21 @@ def train_vae(
     class_weights = None
     if use_class_weights:
         # Use the method specified by command-line arguments or the default
-        cache_file = None if (args and args.no_cache) else (args.cache_file if args else "cache/block_counts.pt")
+        cache_file = (
+            None
+            if (args and args.no_cache)
+            else (args.cache_file if args else "cache/block_counts.pt")
+        )
         force_recount = args.force_recount if args else False
-        
+
         class_weights = calculate_class_weights(
-            dataloader, 
-            vae.num_blocks, 
+            dataloader,
+            vae.num_blocks,
             device,
             method=args.weight_method if args else "effective_samples",
             beta=args.beta if args else 0.9999,
             cache_file=cache_file,
-            force_recount=force_recount
+            force_recount=force_recount,
         )
 
     try:
@@ -872,8 +909,16 @@ def train_vae(
 
                 # Calculate loss
                 loss, recon_loss, kld_loss = vae_loss_function(
-                    reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights,
-                    use_focal_loss=use_focal_loss, gamma=focal_gamma, alpha=focal_alpha
+                    reconstructed,
+                    blocks,
+                    mu,
+                    log_var,
+                    mask,
+                    kld_weight,
+                    class_weights,
+                    use_focal_loss=use_focal_loss,
+                    gamma=focal_gamma,
+                    alpha=focal_alpha,
                 )
 
                 # Backward pass
@@ -881,13 +926,15 @@ def train_vae(
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
                 optimizer.step()
-                
+
                 # Step the scheduler if provided
                 if scheduler is not None:
                     scheduler.step()
                     # Update progress bar to show current learning rate
                     current_lr = scheduler.get_last_lr()[0]
-                    progress_bar.set_postfix({"loss": f"{loss.item():.4f}", "lr": f"{current_lr:.6f}"})
+                    progress_bar.set_postfix(
+                        {"loss": f"{loss.item():.4f}", "lr": f"{current_lr:.6f}"}
+                    )
 
                 # Calculate accuracy
                 with torch.no_grad():
@@ -922,7 +969,9 @@ def train_vae(
             avg_recon_loss = epoch_recon_loss / len(dataloader)
             avg_kld_loss = epoch_kld_loss / len(dataloader)
             avg_accuracy = (
-                epoch_correct / epoch_valid_positions if epoch_valid_positions > 0 else 0
+                epoch_correct / epoch_valid_positions
+                if epoch_valid_positions > 0
+                else 0
             )
 
             print(f"Epoch {epoch + 1}/{epochs}:")
@@ -944,7 +993,7 @@ def train_vae(
                     num_samples=0,  # Don't need samples during training
                     verbose=False,
                     class_weights=class_weights,
-                    use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
+                    use_focal_loss=False,  # Don't use focal loss for evaluation to keep metrics comparable
                 )
 
                 # Print validation results
@@ -978,22 +1027,34 @@ def train_vae(
                         "accuracy": avg_accuracy,
                     }
                 )
-                
+
             # Save checkpoint if needed
             if (epoch + 1) % save_interval == 0:
-                checkpoint_path = os.path.join(checkpoint_dir, f"vae_checkpoint_epoch_{epoch+1}.pth")
-                save_vae(vae=vae, optimizer=optimizer, losses=losses, filename=checkpoint_path)
-                print(f"Checkpoint saved at epoch {epoch+1}")
-                
+                checkpoint_path = os.path.join(
+                    checkpoint_dir, f"vae_checkpoint_epoch_{epoch + 1}.pth"
+                )
+                save_vae(
+                    vae=vae,
+                    optimizer=optimizer,
+                    losses=losses,
+                    filename=checkpoint_path,
+                )
+                print(f"Checkpoint saved at epoch {epoch + 1}")
+
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Saving model...")
         # Save the model at the current state
         interrupted_path = os.path.join(checkpoint_dir, "vae_interrupted.pth")
         save_vae(vae=vae, optimizer=optimizer, losses=losses, filename=interrupted_path)
         print(f"Model saved to {interrupted_path}")
-        
+
         # Also save to the default location
-        save_vae(vae=vae, optimizer=optimizer, losses=losses, filename="models/minecraft_vae.pth")
+        save_vae(
+            vae=vae,
+            optimizer=optimizer,
+            losses=losses,
+            filename="models/minecraft_vae.pth",
+        )
         print("Model also saved to models/minecraft_vae.pth")
 
     return losses
@@ -1049,8 +1110,14 @@ def evaluate_vae(
 
             # Calculate loss
             loss, recon_loss, kld_loss = vae_loss_function(
-                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights,
-                use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
+                reconstructed,
+                blocks,
+                mu,
+                log_var,
+                mask,
+                kld_weight,
+                class_weights,
+                use_focal_loss=False,  # Don't use focal loss for evaluation to keep metrics comparable
             )
 
             # Update totals
@@ -1146,68 +1213,66 @@ def load_vae(filename, vae, optimizer=None):
 
 if __name__ == "__main__":
     import argparse
-    
+
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Train a VAE for Minecraft structures")
     parser.add_argument(
-        "--weight-method", 
-        type=str, 
+        "--weight-method",
+        type=str,
         default="effective_samples",
         choices=["inverse", "log", "sqrt", "effective_samples", "balanced"],
-        help="Method to calculate class weights (default: effective_samples)"
+        help="Method to calculate class weights (default: effective_samples)",
     )
     parser.add_argument(
-        "--beta", 
-        type=float, 
+        "--beta",
+        type=float,
         default=0.9999,
-        help="Beta parameter for effective_samples method (default: 0.9999)"
+        help="Beta parameter for effective_samples method (default: 0.9999)",
     )
     parser.add_argument(
         "--cache-file",
         type=str,
         default="cache/block_counts.pt",
-        help="Path to cache file for block counts (default: cache/block_counts.pt)"
+        help="Path to cache file for block counts (default: cache/block_counts.pt)",
     )
     parser.add_argument(
         "--force-recount",
         action="store_true",
-        help="Force recounting blocks even if cache exists"
+        help="Force recounting blocks even if cache exists",
     )
     parser.add_argument(
-        "--no-cache",
-        action="store_true",
-        help="Disable caching of block counts"
+        "--no-cache", action="store_true", help="Disable caching of block counts"
     )
     parser.add_argument(
         "--use-focal-loss",
         action="store_true",
-        help="Use focal loss instead of cross-entropy loss"
+        help="Use focal loss instead of cross-entropy loss",
     )
     parser.add_argument(
         "--focal-gamma",
         type=float,
         default=2.0,
-        help="Gamma parameter for focal loss (default: 2.0)"
+        help="Gamma parameter for focal loss (default: 2.0)",
     )
     parser.add_argument(
         "--no-focal-loss",
         action="store_true",
-        help="Disable focal loss (overrides --use-focal-loss)"
+        help="Disable focal loss (overrides --use-focal-loss)",
     )
     parser.add_argument(
         "--save-interval",
         type=int,
         default=5,
-        help="Save checkpoint every N epochs (default: 5)"
+        help="Save checkpoint every N epochs (default: 5)",
     )
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
         default="models/checkpoints",
-        help="Directory to save checkpoints (default: models/checkpoints)"
+        help="Directory to save checkpoints (default: models/checkpoints)",
     )
     args = parser.parse_args()
-    
+
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -1222,7 +1287,6 @@ if __name__ == "__main__":
         chunk_size=16,
         cache_file="cache/block_mappings.pkl",
         max_files=None,  # Use all files
-        # preload=True,
     )
 
     # Split into train and validation sets
@@ -1234,10 +1298,18 @@ if __name__ == "__main__":
 
     # Create DataLoaders
     train_dataloader = DataLoader(
-        train_dataset, batch_size=64, shuffle=True, num_workers=8, pin_memory=True
+        train_dataset,
+        batch_size=64,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=False,
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=64, shuffle=False, num_workers=8, pin_memory=True
+        val_dataset,
+        batch_size=64,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=False,
     )
 
     # Create the VAE
@@ -1252,11 +1324,6 @@ if __name__ == "__main__":
     # Create optimizer
     optimizer = torch.optim.AdamW(vae.parameters(), lr=1e-3)
 
-    # Compare different class weighting methods to help choose the best one
-    print("\nComparing different class weighting methods...")
-    compare_weighting_methods(train_dataloader, vae.num_blocks, device)
-    print("You can examine 'class_weights_comparison.png' to choose the best method")
-    
     # Create CyclicLR scheduler
     # Using triangular2 mode which reduces the amplitude by half each cycle
     # This is often more performant for neural networks
@@ -1264,10 +1331,10 @@ if __name__ == "__main__":
     scheduler = CyclicLR(
         optimizer,
         base_lr=1e-4,  # Lower learning rate boundary
-        max_lr=5e-3,   # Upper learning rate boundary
+        max_lr=5e-3,  # Upper learning rate boundary
         step_size_up=step_size_up,
-        mode='triangular2',  # Triangular cycle with amplitude halved each time
-        cycle_momentum=False  # AdamW doesn't use momentum
+        mode="triangular2",  # Triangular cycle with amplitude halved each time
+        cycle_momentum=False,  # AdamW doesn't use momentum
     )
 
     # Visualize the learning rate schedule for one cycle
@@ -1287,7 +1354,8 @@ if __name__ == "__main__":
         kld_weight=0.01,
         scheduler=scheduler,
         args=args,  # Pass command-line arguments
-        use_focal_loss=args.use_focal_loss and not args.no_focal_loss,  # Use focal loss if enabled and not disabled
+        use_focal_loss=args.use_focal_loss
+        and not args.no_focal_loss,  # Use focal loss if enabled and not disabled
         focal_gamma=args.focal_gamma,  # Use gamma value from command-line arguments
         focal_alpha=None,  # Use class_weights as alpha
         save_interval=args.save_interval,  # Save checkpoint every N epochs from command-line
@@ -1296,10 +1364,10 @@ if __name__ == "__main__":
 
     # Evaluate the VAE
     eval_results = evaluate_vae(
-        vae=vae, 
-        dataloader=val_dataloader, 
+        vae=vae,
+        dataloader=val_dataloader,
         device=device,
-        use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
+        use_focal_loss=False,  # Don't use focal loss for evaluation to keep metrics comparable
     )
 
     # Save the VAE
