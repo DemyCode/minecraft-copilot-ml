@@ -513,10 +513,11 @@ def calculate_class_weights(dataloader, num_classes, device="cuda", method="effe
 
 
 def vae_loss_function(
-    reconstructed, target, mu, log_var, mask=None, kld_weight=0.01, class_weights=None
+    reconstructed, target, mu, log_var, mask=None, kld_weight=0.01, class_weights=None,
+    use_focal_loss=False, gamma=2.0, alpha=None
 ):
     """
-    VAE loss function.
+    VAE loss function with optional focal loss.
 
     Args:
         reconstructed (torch.Tensor): Reconstructed output logits
@@ -526,28 +527,62 @@ def vae_loss_function(
         mask (torch.Tensor, optional): Mask tensor
         kld_weight (float): Weight for the KL divergence term
         class_weights (torch.Tensor, optional): Weights for each class to handle imbalance
+        use_focal_loss (bool): Whether to use focal loss instead of cross-entropy
+        gamma (float): Focusing parameter for focal loss (higher values focus more on hard examples)
+        alpha (torch.Tensor, optional): Alpha weighting for focal loss (can be same as class_weights)
 
     Returns:
         tuple: (total_loss, reconstruction_loss, kld_loss)
     """
-    # Reconstruction loss (cross-entropy)
+    # Reshape inputs for loss calculation
     # reconstructed shape: (batch_size, chunk_size, chunk_size, chunk_size, num_blocks)
     # target shape: (batch_size, chunk_size, chunk_size, chunk_size)
-    if class_weights is not None:
-        # Use weighted cross-entropy loss
-        recon_loss = F.cross_entropy(
-            reconstructed.reshape(-1, reconstructed.size(-1)),
-            target.reshape(-1),
-            weight=class_weights,
-            reduction="none",
-        )
+    reconstructed_flat = reconstructed.reshape(-1, reconstructed.size(-1))
+    target_flat = target.reshape(-1)
+    
+    if use_focal_loss:
+        # Implement focal loss
+        # First get the log softmax outputs
+        log_probs = F.log_softmax(reconstructed_flat, dim=-1)
+        
+        # Get the probabilities for the target class
+        probs = torch.exp(log_probs)
+        target_probs = probs.gather(1, target_flat.unsqueeze(1)).squeeze(1)
+        
+        # Calculate focal weight: (1 - p_t)^gamma
+        focal_weight = (1 - target_probs).pow(gamma)
+        
+        # Apply class weights if provided (as alpha in focal loss)
+        if class_weights is not None:
+            # If alpha is not provided, use class_weights as alpha
+            if alpha is None:
+                alpha = class_weights
+            
+            # Get alpha for each target
+            alpha_t = alpha.gather(0, target_flat)
+            
+            # Apply alpha to focal weight
+            focal_weight = alpha_t * focal_weight
+        
+        # Calculate focal loss: -alpha_t * (1 - p_t)^gamma * log(p_t)
+        recon_loss = -focal_weight * log_probs.gather(1, target_flat.unsqueeze(1)).squeeze(1)
     else:
         # Use standard cross-entropy loss
-        recon_loss = F.cross_entropy(
-            reconstructed.reshape(-1, reconstructed.size(-1)),
-            target.reshape(-1),
-            reduction="none",
-        )
+        if class_weights is not None:
+            # Use weighted cross-entropy loss
+            recon_loss = F.cross_entropy(
+                reconstructed_flat,
+                target_flat,
+                weight=class_weights,
+                reduction="none",
+            )
+        else:
+            # Use standard cross-entropy loss
+            recon_loss = F.cross_entropy(
+                reconstructed_flat,
+                target_flat,
+                reduction="none",
+            )
 
     # Apply mask if provided
     if mask is not None:
@@ -764,6 +799,9 @@ def train_vae(
     use_class_weights=False,
     scheduler=None,
     args=None,  # Command-line arguments
+    use_focal_loss=False,
+    focal_gamma=2.0,
+    focal_alpha=None,
 ):
     """
     Train the VAE.
@@ -779,6 +817,9 @@ def train_vae(
         use_class_weights (bool): Whether to use class weights to handle imbalance
         scheduler (torch.optim.lr_scheduler._LRScheduler, optional): Learning rate scheduler
         args (argparse.Namespace, optional): Command-line arguments containing weight_method and beta
+        use_focal_loss (bool): Whether to use focal loss instead of cross-entropy
+        focal_gamma (float): Focusing parameter for focal loss (higher values focus more on hard examples)
+        focal_alpha (torch.Tensor, optional): Alpha weighting for focal loss (can be same as class_weights)
 
     Returns:
         list: Training losses
@@ -822,7 +863,8 @@ def train_vae(
 
             # Calculate loss
             loss, recon_loss, kld_loss = vae_loss_function(
-                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights
+                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights,
+                use_focal_loss=use_focal_loss, gamma=focal_gamma, alpha=focal_alpha
             )
 
             # Backward pass
@@ -893,6 +935,7 @@ def train_vae(
                 num_samples=0,  # Don't need samples during training
                 verbose=False,
                 class_weights=class_weights,
+                use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
             )
 
             # Print validation results
@@ -938,6 +981,9 @@ def evaluate_vae(
     num_samples=5,
     verbose=True,
     class_weights=None,
+    use_focal_loss=False,
+    focal_gamma=2.0,
+    focal_alpha=None,
 ):
     """
     Evaluate the VAE on a validation set.
@@ -950,6 +996,9 @@ def evaluate_vae(
         num_samples (int): Number of samples to visualize
         verbose (bool): Whether to print evaluation results
         class_weights (torch.Tensor, optional): Weights for each class to handle imbalance
+        use_focal_loss (bool): Whether to use focal loss instead of cross-entropy
+        focal_gamma (float): Focusing parameter for focal loss (higher values focus more on hard examples)
+        focal_alpha (torch.Tensor, optional): Alpha weighting for focal loss (can be same as class_weights)
     Returns:
         dict: Evaluation metrics
     """
@@ -974,7 +1023,8 @@ def evaluate_vae(
 
             # Calculate loss
             loss, recon_loss, kld_loss = vae_loss_function(
-                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights
+                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights,
+                use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
             )
 
             # Update totals
@@ -1102,6 +1152,22 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable caching of block counts"
     )
+    parser.add_argument(
+        "--use-focal-loss",
+        action="store_true",
+        help="Use focal loss instead of cross-entropy loss"
+    )
+    parser.add_argument(
+        "--focal-gamma",
+        type=float,
+        default=2.0,
+        help="Gamma parameter for focal loss (default: 2.0)"
+    )
+    parser.add_argument(
+        "--no-focal-loss",
+        action="store_true",
+        help="Disable focal loss (overrides --use-focal-loss)"
+    )
     args = parser.parse_args()
     
     # Set device
@@ -1183,10 +1249,18 @@ if __name__ == "__main__":
         kld_weight=0.01,
         scheduler=scheduler,
         args=args,  # Pass command-line arguments
+        use_focal_loss=args.use_focal_loss and not args.no_focal_loss,  # Use focal loss if enabled and not disabled
+        focal_gamma=args.focal_gamma,  # Use gamma value from command-line arguments
+        focal_alpha=None,  # Use class_weights as alpha
     )
 
     # Evaluate the VAE
-    eval_results = evaluate_vae(vae=vae, dataloader=val_dataloader, device=device)
+    eval_results = evaluate_vae(
+        vae=vae, 
+        dataloader=val_dataloader, 
+        device=device,
+        use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
+    )
 
     # Save the VAE
     save_vae(
