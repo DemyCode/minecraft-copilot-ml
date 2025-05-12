@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import CyclicLR
+# Import torch.optim.lr_scheduler is not needed as we use torch.optim.lr_scheduler directly
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -1028,7 +1028,7 @@ def plot_lr_schedule(scheduler, num_steps):
     Visualize the learning rate schedule.
 
     Args:
-        scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler
+        scheduler (torch.optim.lr_scheduler._LRScheduler or ReduceLROnPlateau): Learning rate scheduler
         num_steps (int): Number of steps to visualize
     """
     # Store original LR
@@ -1036,25 +1036,59 @@ def plot_lr_schedule(scheduler, num_steps):
     for param_group in scheduler.optimizer.param_groups:
         original_lrs.append(param_group["lr"])
 
-    # Get learning rates for each step
-    lrs = []
-    for i in range(num_steps):
-        lrs.append(scheduler.get_last_lr()[0])
-        scheduler.step()
+    # Check if scheduler is ReduceLROnPlateau
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        # For ReduceLROnPlateau, we can't predict future LRs, so just show the current LR
+        # and the potential reduction pattern
+        initial_lr = original_lrs[0]
+        factor = scheduler.factor
+        min_lr = scheduler.min_lrs[0]
+        
+        # Simulate potential LR reductions
+        lrs = [initial_lr]
+        current_lr = initial_lr
+        for _ in range(5):  # Simulate 5 potential reductions
+            current_lr = max(current_lr * factor, min_lr)
+            lrs.extend([current_lr] * (num_steps // 5))
+            
+        # Trim to requested number of steps
+        lrs = lrs[:num_steps]
+    else:
+        # For standard schedulers like CyclicLR
+        # Get learning rates for each step
+        lrs = []
+        for i in range(num_steps):
+            lrs.append(scheduler.get_last_lr()[0])
+            scheduler.step()
 
-    # Reset scheduler and optimizer to original state
-    for i, param_group in enumerate(scheduler.optimizer.param_groups):
-        param_group["lr"] = original_lrs[i]
-    scheduler.base_lrs = [original_lrs[0]]  # Reset base_lrs
+        # Reset scheduler and optimizer to original state
+        for i, param_group in enumerate(scheduler.optimizer.param_groups):
+            param_group["lr"] = original_lrs[i]
+            
+        # Reset base_lrs if the attribute exists
+        if hasattr(scheduler, 'base_lrs'):
+            scheduler.base_lrs = [original_lrs[0]]
 
     # Plot learning rates
     plt.figure(figsize=(10, 5))
     plt.plot(lrs)
     plt.xlabel("Step")
     plt.ylabel("Learning Rate")
-    plt.title("CyclicLR Schedule")
+    
+    # Update title based on scheduler type
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        plt.title("ReduceLROnPlateau Schedule (Simulated)")
+    else:
+        plt.title("Learning Rate Schedule")
+        
     plt.grid(True)
-    plt.savefig("cyclic_lr_schedule.png")
+    
+    # Update filename based on scheduler type
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        plt.savefig("reduce_lr_on_plateau_schedule.png")
+    else:
+        plt.savefig("learning_rate_schedule.png")
+        
     plt.close()
 
 
@@ -1219,9 +1253,8 @@ def train_vae(
                         scaler.update()
                         optimizer.zero_grad()
 
-                        # Step the scheduler if provided
-                        if scheduler is not None:
-                            scheduler.step()
+                        # For CyclicLR and other epoch-independent schedulers
+                        # ReduceLROnPlateau will be stepped after validation
                 else:
                     # Standard precision training
                     reconstructed, mu, log_var = vae(blocks, mask)
@@ -1255,9 +1288,8 @@ def train_vae(
                         optimizer.step()
                         optimizer.zero_grad()
 
-                        # Step the scheduler if provided
-                        if scheduler is not None:
-                            scheduler.step()
+                        # For CyclicLR and other epoch-independent schedulers
+                        # ReduceLROnPlateau will be stepped after validation
 
                 # Extract scalar values to prevent memory leaks
                 loss_value = (
@@ -1385,6 +1417,10 @@ def train_vae(
                 print(
                     f"  Val Accuracy: {val_results['accuracy']:.4f} ({val_results['correct']}/{val_results['total']})"
                 )
+                
+                # Step the ReduceLROnPlateau scheduler with validation loss
+                if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step(val_results['loss'])
 
                 # Save loss with validation
                 losses.append(
@@ -1793,26 +1829,29 @@ if __name__ == "__main__":
         hidden_dims=[64, 128, 256],
     ).to(device)
 
-    # Create optimizer
-    optimizer = torch.optim.AdamW(vae.parameters(), lr=1e-3)
+    # Create optimizer with higher initial learning rate
+    optimizer = torch.optim.AdamW(vae.parameters(), lr=1e-1)  # Starting with 1e-1 as requested
 
-    # Create CyclicLR scheduler
-    # Using triangular2 mode which reduces the amplitude by half each cycle
-    # This is often more performant for neural networks
-    step_size_up = len(train_dataloader) * 2  # Size of one cycle = 2 epochs
-    scheduler = CyclicLR(
+    # Create ReduceLROnPlateau scheduler
+    # This will reduce the learning rate when the validation loss plateaus
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        base_lr=1e-4,  # Lower learning rate boundary
-        max_lr=5e-3,  # Upper learning rate boundary
-        step_size_up=step_size_up,
-        mode="triangular2",  # Triangular cycle with amplitude halved each time
-        cycle_momentum=False,  # AdamW doesn't use momentum
+        mode='min',           # Reduce LR when the quantity monitored has stopped decreasing
+        factor=0.5,           # Factor by which the learning rate will be reduced (new_lr = lr * factor)
+        patience=3,           # Number of epochs with no improvement after which learning rate will be reduced
+        threshold=0.0001,     # Threshold for measuring the new optimum
+        threshold_mode='rel', # Interpretation of threshold: 'rel' or 'abs'
+        cooldown=0,           # Number of epochs to wait before resuming normal operation after lr has been reduced
+        min_lr=1e-6,          # Lower bound on the learning rate
+        verbose=True          # Print message when LR is reduced
     )
 
-    # Visualize the learning rate schedule for one cycle
+    print(f"\nUsing ReduceLROnPlateau scheduler with initial learning rate: {optimizer.param_groups[0]['lr']}")
+    
+    # Generate learning rate schedule visualization
     print("\nGenerating learning rate schedule visualization...")
-    plot_lr_schedule(scheduler, step_size_up * 2)  # Plot for one complete cycle
-    print("Learning rate schedule visualization saved to 'cyclic_lr_schedule.png'")
+    plot_lr_schedule(scheduler, 20)  # Simulate 20 epochs with potential reductions
+    print("Learning rate schedule visualization saved to 'reduce_lr_on_plateau_schedule.png'")
 
     # Train the VAE
     losses = train_vae(
