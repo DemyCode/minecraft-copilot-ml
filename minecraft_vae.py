@@ -161,18 +161,30 @@ class MinecraftVAE(nn.Module):
             # Apply mask
             # embedded shape: (batch_size, embedding_dim, chunk_size, chunk_size, chunk_size)
             embedded = embedded * mask_expanded
+            
+            # Free memory
+            del mask_expanded
 
         # Encode
         # encoded shape: (batch_size, hidden_dims[-1], chunk_size/8, chunk_size/8, chunk_size/8)
         encoded = self.encoder(embedded)
+        
+        # Free memory
+        del embedded
 
         # Flatten
         # flattened shape: (batch_size, flatten_size)
         flattened = encoded.reshape(encoded.size(0), -1)
+        
+        # Free memory
+        del encoded
 
         # Get latent parameters
         mu = self.fc_mu(flattened)
         log_var = self.fc_var(flattened)
+        
+        # Free memory
+        del flattened
 
         return mu, log_var
 
@@ -198,14 +210,23 @@ class MinecraftVAE(nn.Module):
         reshaped = decoded.reshape(
             -1, last_h_dim, spatial_dim, spatial_dim, spatial_dim
         )
+        
+        # Free memory
+        del decoded
 
         # Decode
         # decoded shape: (batch_size, embedding_dim, chunk_size, chunk_size, chunk_size)
         decoded = self.decoder(reshaped)
+        
+        # Free memory
+        del reshaped
 
         # Predict block types
         # logits shape: (batch_size, num_blocks, chunk_size, chunk_size, chunk_size)
         logits = self.block_predictor(decoded)
+        
+        # Free memory
+        del decoded
 
         # Permute to get the block dimension at the end
         # logits shape: (batch_size, chunk_size, chunk_size, chunk_size, num_blocks)
@@ -227,6 +248,10 @@ class MinecraftVAE(nn.Module):
         std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
         z = mu + eps * std
+        
+        # Free memory
+        del std, eps
+        
         return z
 
     def forward(self, x, mask=None):
@@ -248,6 +273,9 @@ class MinecraftVAE(nn.Module):
 
         # Decode
         reconstructed = self.decode(z)
+        
+        # Free memory
+        del z
 
         return reconstructed, mu, log_var
 
@@ -267,11 +295,17 @@ class MinecraftVAE(nn.Module):
 
         # Decode
         samples = self.decode(z)
+        
+        # Free memory
+        del z
 
         # Get the most likely block for each position
         # samples shape: (num_samples, chunk_size, chunk_size, chunk_size, num_blocks)
         # blocks shape: (num_samples, chunk_size, chunk_size, chunk_size)
         blocks = torch.argmax(samples, dim=-1)
+        
+        # Free memory
+        del samples
 
         return blocks
 
@@ -926,6 +960,14 @@ def train_vae(
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
                 optimizer.step()
+                
+                # Detach tensors from computation graph to prevent memory leak
+                loss_value = loss.item()
+                recon_loss_value = recon_loss.item()
+                kld_loss_value = kld_loss.item()
+                
+                # Free memory
+                del loss, recon_loss, kld_loss
 
                 # Step the scheduler if provided
                 if scheduler is not None:
@@ -933,20 +975,28 @@ def train_vae(
                     # Update progress bar to show current learning rate
                     current_lr = scheduler.get_last_lr()[0]
                     progress_bar.set_postfix(
-                        {"loss": f"{loss.item():.4f}", "lr": f"{current_lr:.6f}"}
+                        {"loss": f"{loss_value:.4f}", "lr": f"{current_lr:.6f}"}
                     )
 
                 # Calculate accuracy
                 with torch.no_grad():
                     pred_blocks = torch.argmax(reconstructed, dim=-1)
                     correct = (pred_blocks == blocks) & (mask.bool())
-                    epoch_correct += correct.sum().item()
-                    epoch_valid_positions += mask.sum().item()
+                    correct_sum = correct.sum().item()
+                    mask_sum = mask.sum().item()
+                    epoch_correct += correct_sum
+                    epoch_valid_positions += mask_sum
+                    
+                    # Free memory
+                    del pred_blocks, correct
+                
+                # Free memory from forward pass
+                del reconstructed, mu, log_var
 
                 # Update progress bar
-                epoch_loss += loss.item()
-                epoch_recon_loss += recon_loss.item()
-                epoch_kld_loss += kld_loss.item()
+                epoch_loss += loss_value
+                epoch_recon_loss += recon_loss_value
+                epoch_kld_loss += kld_loss_value
 
                 # Calculate current accuracy
                 current_accuracy = (
@@ -1040,6 +1090,10 @@ def train_vae(
                     filename=checkpoint_path,
                 )
                 print(f"Checkpoint saved at epoch {epoch + 1}")
+                
+            # Clear memory at the end of each epoch
+            if device == "cuda":
+                torch.cuda.empty_cache()
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Saving model...")
@@ -1120,26 +1174,43 @@ def evaluate_vae(
                 use_focal_loss=False,  # Don't use focal loss for evaluation to keep metrics comparable
             )
 
-            # Update totals
-            total_loss += loss.item()
-            total_recon_loss += recon_loss.item()
-            total_kld_loss += kld_loss.item()
+            # Extract values and update totals
+            loss_value = loss.item()
+            recon_loss_value = recon_loss.item()
+            kld_loss_value = kld_loss.item()
+            
+            total_loss += loss_value
+            total_recon_loss += recon_loss_value
+            total_kld_loss += kld_loss_value
+            
+            # Free memory
+            del loss, recon_loss, kld_loss
 
             # Calculate accuracy
             pred_blocks = torch.argmax(reconstructed, dim=-1)
             correct = (pred_blocks == blocks) & (mask.bool())
-            total_correct += correct.sum().item()
-            total_valid_positions += mask.sum().item()
+            correct_sum = correct.sum().item()
+            mask_sum = mask.sum().item()
+            
+            total_correct += correct_sum
+            total_valid_positions += mask_sum
 
             # Store samples for visualization
             if i < num_samples:
                 samples.append(
                     {
-                        "input": blocks[0].cpu(),
-                        "mask": mask[0].cpu(),
-                        "reconstructed": pred_blocks[0].cpu(),
+                        "input": blocks[0].cpu().clone().detach(),
+                        "mask": mask[0].cpu().clone().detach(),
+                        "reconstructed": pred_blocks[0].cpu().clone().detach(),
                     }
                 )
+                
+            # Free memory
+            del blocks, mask, reconstructed, mu, log_var, pred_blocks, correct
+            
+            # Clear CUDA cache periodically (every 10 batches)
+            if i % 10 == 0 and device == "cuda":
+                torch.cuda.empty_cache()
 
     # Calculate average losses and accuracy
     avg_loss = total_loss / len(dataloader)

@@ -103,13 +103,15 @@ class LatentSpaceDataset(Dataset):
             device (str): Device to use
             context_dim (int): Dimension of the context vector (0 for unconditional)
         """
-        self.vae = vae
-        self.device = device
         self.context_dim = context_dim
         
         # Collect latent vectors
-        self.latent_vectors = []
-        self.contexts = []
+        latent_vectors = []
+        contexts = []
+        
+        # Clear CUDA cache before starting
+        if device == "cuda":
+            torch.cuda.empty_cache()
         
         with torch.no_grad():
             for batch in tqdm(dataloader, desc="Collecting latent vectors"):
@@ -120,20 +122,34 @@ class LatentSpaceDataset(Dataset):
                 # Encode
                 mu, _ = vae.encode(blocks, mask)
                 
-                # Store latent vectors
-                self.latent_vectors.append(mu.cpu())
+                # Store latent vectors (detached and moved to CPU)
+                latent_vectors.append(mu.detach().cpu())
                 
                 # Generate random context vectors if needed
                 if context_dim > 0:
                     context = torch.randn(blocks.shape[0], context_dim)
-                    self.contexts.append(context)
+                    contexts.append(context)
+                
+                # Free memory
+                del blocks, mask, mu
+                
+                # Periodically clear cache
+                if len(latent_vectors) % 10 == 0 and device == "cuda":
+                    torch.cuda.empty_cache()
         
         # Concatenate latent vectors
-        self.latent_vectors = torch.cat(self.latent_vectors, dim=0)
+        self.latent_vectors = torch.cat(latent_vectors, dim=0)
         
         # Concatenate context vectors if needed
         if context_dim > 0:
-            self.contexts = torch.cat(self.contexts, dim=0)
+            self.contexts = torch.cat(contexts, dim=0)
+        
+        # Clear references to free memory
+        del latent_vectors, contexts
+        
+        # Final cache clear
+        if device == "cuda":
+            torch.cuda.empty_cache()
     
     def __len__(self):
         return len(self.latent_vectors)
@@ -183,6 +199,10 @@ def train_flow_matching(flow_model, dataset, optimizer, device="cuda", epochs=10
     for epoch in range(epochs):
         epoch_loss = 0
         
+        # Clear CUDA cache at the beginning of each epoch
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        
         progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
         for batch in progress_bar:
             # Get data
@@ -210,9 +230,21 @@ def train_flow_matching(flow_model, dataset, optimizer, device="cuda", epochs=10
             loss.backward()
             optimizer.step()
             
+            # Detach tensors to free memory
+            z_0 = z_0.detach()
+            z_1 = z_1.detach()
+            z_t = z_t.detach()
+            v_t = v_t.detach()
+            v_pred = v_pred.detach()
+            loss = loss.detach()
+            
             # Update progress bar
             epoch_loss += loss.item()
             progress_bar.set_postfix({'loss': epoch_loss / (progress_bar.n + 1)})
+            
+            # Free memory periodically (every 10 batches)
+            if progress_bar.n % 10 == 0 and device == "cuda":
+                torch.cuda.empty_cache()
         
         # Calculate average loss
         avg_loss = epoch_loss / len(dataloader)
@@ -221,6 +253,10 @@ def train_flow_matching(flow_model, dataset, optimizer, device="cuda", epochs=10
         print(f"  Loss: {avg_loss:.6f}")
         
         losses.append(avg_loss)
+        
+        # Clear CUDA cache at the end of each epoch
+        if device == "cuda":
+            torch.cuda.empty_cache()
     
     return losses
 
@@ -243,6 +279,10 @@ def generate_samples_with_flow(vae, flow_model, device="cuda", num_samples=5, st
     vae.eval()
     flow_model.eval()
     
+    # Clear CUDA cache before starting
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    
     # Sample from the prior
     z_0 = torch.randn(num_samples, vae.latent_dim, device=device)
     
@@ -260,10 +300,24 @@ def generate_samples_with_flow(vae, flow_model, device="cuda", num_samples=5, st
             
             # Update z_t
             z_t = z_t + v_t * dt
+            
+            # Free memory
+            del v_t
+            
+            # Periodically clear cache
+            if i % 20 == 0 and device == "cuda":
+                torch.cuda.empty_cache()
         
         # Decode
         logits = vae.decode(z_t)
-        samples = torch.argmax(logits, dim=-1)
+        samples = torch.argmax(logits, dim=-1).detach().clone()
+        
+        # Free memory
+        del z_0, z_t, logits
+        
+        # Final cache clear
+        if device == "cuda":
+            torch.cuda.empty_cache()
     
     return samples
 
@@ -376,6 +430,10 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
     print(f"Using device: {device}")
     
+    # Clear CUDA cache at the start
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    
     # Create directories if they don't exist
     os.makedirs('cache', exist_ok=True)
     os.makedirs('models', exist_ok=True)
@@ -407,6 +465,10 @@ def main(args):
         num_workers=args.num_workers
     )
     
+    # Clear CUDA cache before loading models
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    
     # Create or load the VAE
     vae = MinecraftVAE(
         num_blocks=len(dataset.block_to_idx),
@@ -436,9 +498,17 @@ def main(args):
     # Load flow model if specified
     if args.load_flow_model:
         flow_model, optimizer, _ = load_flow_model(args.load_flow_model, flow_model, optimizer)
+        
+    # Clear CUDA cache after loading models
+    if device == "cuda":
+        torch.cuda.empty_cache()
     
     # Train if specified
     if args.train:
+        # Clear CUDA cache before training
+        if device == "cuda":
+            torch.cuda.empty_cache()
+            
         # Create latent space dataset
         latent_dataset = LatentSpaceDataset(
             vae=vae,
@@ -465,9 +535,18 @@ def main(args):
             losses=losses,
             filename=args.save_flow_model
         )
+        
+        # Clear memory after training
+        del latent_dataset
+        if device == "cuda":
+            torch.cuda.empty_cache()
     
     # Generate samples if specified
     if args.generate:
+        # Clear CUDA cache before generating samples
+        if device == "cuda":
+            torch.cuda.empty_cache()
+            
         # Generate context if needed
         context = None
         if args.context_dim > 0:
@@ -489,6 +568,16 @@ def main(args):
             dataset=dataset,
             filename="flow_samples.png"
         )
+        
+        # Clear memory after generating samples
+        del samples, context
+        if device == "cuda":
+            torch.cuda.empty_cache()
+    
+    # Final memory cleanup
+    del vae, flow_model, optimizer, dataset, train_dataset, val_dataset
+    if device == "cuda":
+        torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
