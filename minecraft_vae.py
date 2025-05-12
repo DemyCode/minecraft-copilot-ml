@@ -1269,9 +1269,21 @@ def train_vae(
                 # Free memory
                 del loss, recon_loss, kld_loss
 
-                # Calculate current accuracy for progress bar
-                current_accuracy = correct_sum / mask_sum if mask_sum > 0 else 0
+                # Calculate accuracy (use torch operations instead of item() where possible)
+                with torch.no_grad():
+                    pred_blocks = torch.argmax(reconstructed, dim=-1)
+                    correct = (pred_blocks == blocks) & (mask.bool())
+                    correct_sum = correct.sum().item()
+                    mask_sum = mask.sum().item()
+                    epoch_correct += correct_sum
+                    epoch_valid_positions += mask_sum
+                    
+                    # Calculate current accuracy for progress bar
+                    current_accuracy = correct_sum / mask_sum if mask_sum > 0 else 0
 
+                    # Free memory
+                    del pred_blocks, correct
+                
                 # Update progress bar with detailed metrics
                 if scheduler is not None:
                     current_lr = scheduler.get_last_lr()[0]
@@ -1293,18 +1305,6 @@ def train_vae(
                             "acc": f"{current_accuracy:.4f}",
                         }
                     )
-
-                # Calculate accuracy (use torch operations instead of item() where possible)
-                with torch.no_grad():
-                    pred_blocks = torch.argmax(reconstructed, dim=-1)
-                    correct = (pred_blocks == blocks) & (mask.bool())
-                    correct_sum = correct.sum().item()
-                    mask_sum = mask.sum().item()
-                    epoch_correct += correct_sum
-                    epoch_valid_positions += mask_sum
-
-                    # Free memory
-                    del pred_blocks, correct
 
                 # Free memory from forward pass
                 del reconstructed, mu, log_var, blocks, mask
