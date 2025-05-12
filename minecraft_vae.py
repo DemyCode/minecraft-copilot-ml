@@ -4,6 +4,7 @@ Variational Autoencoder (VAE) for Minecraft maps.
 This VAE can encode and decode 3D Minecraft maps, taking into account the mask.
 """
 
+from typing import Optional
 import os
 import torch
 import torch.nn as nn
@@ -27,7 +28,7 @@ class MinecraftVAE(nn.Module):
 
     This VAE encodes 3D Minecraft maps into a latent space and can decode them back.
     It takes into account the mask to handle variable-sized inputs.
-    
+
     Optimized with:
     - Efficient memory management
     - Optional JIT compilation
@@ -83,7 +84,14 @@ class MinecraftVAE(nn.Module):
             # Use more efficient layer configuration
             encoder_layers.append(
                 nn.Sequential(
-                    nn.Conv3d(in_channels, h_dim, kernel_size=3, stride=2, padding=1, bias=False),
+                    nn.Conv3d(
+                        in_channels,
+                        h_dim,
+                        kernel_size=3,
+                        stride=2,
+                        padding=1,
+                        bias=False,
+                    ),
                     nn.BatchNorm3d(h_dim),
                     nn.LeakyReLU(inplace=True),  # Use inplace operations where possible
                 )
@@ -152,10 +160,9 @@ class MinecraftVAE(nn.Module):
 
         # Output layer to predict block types
         self.block_predictor = nn.Sequential(
-            nn.Conv3d(embedding_dim, num_blocks, kernel_size=1), 
-            nn.Sigmoid()
+            nn.Conv3d(embedding_dim, num_blocks, kernel_size=1), nn.Sigmoid()
         )
-        
+
         # JIT compile critical functions if requested
         if use_jit:
             try:
@@ -164,80 +171,84 @@ class MinecraftVAE(nn.Module):
                 self._decode_jit = torch.jit.script(self._decode_impl)
                 self._reparameterize_jit = torch.jit.script(self._reparameterize_impl)
             except Exception as e:
-                print(f"Warning: JIT compilation failed, falling back to regular functions: {e}")
+                print(
+                    f"Warning: JIT compilation failed, falling back to regular functions: {e}"
+                )
                 self.use_jit = False
 
     def _encode_impl(self, x, mask=None):
         """
         Internal implementation of encode for JIT compilation.
-        
+
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, chunk_size, chunk_size, chunk_size)
             mask (torch.Tensor, optional): Mask tensor of shape (batch_size, chunk_size, chunk_size, chunk_size)
-            
+
         Returns:
             tuple: (mu, log_var) of the latent space
         """
         # Embed the blocks
         embedded = self.block_embedding(x)
-        
+
         # Permute to get the embedding dimension as channels
         embedded = embedded.permute(0, 4, 1, 2, 3)
-        
+
         # Apply mask if provided
         if mask is not None:
             mask_expanded = mask.unsqueeze(1)
             embedded = embedded * mask_expanded
-        
+
         # Encode
         encoded = self.encoder(embedded)
-        
+
         # Flatten
         flattened = encoded.reshape(encoded.size(0), -1)
-        
+
         # Get latent parameters
         mu = self.fc_mu(flattened)
         log_var = self.fc_var(flattened)
-        
+
         return mu, log_var
-    
+
     def _decode_impl(self, z):
         """
         Internal implementation of decode for JIT compilation.
-        
+
         Args:
             z (torch.Tensor): Latent vector of shape (batch_size, latent_dim)
-            
+
         Returns:
             torch.Tensor: Reconstructed blocks of shape (batch_size, chunk_size, chunk_size, chunk_size, num_blocks)
         """
         # Decode from latent space
         decoded = self.decoder_input(z)
-        
+
         # Reshape to 3D volume
         last_h_dim = self.hidden_dims[-1]
         spatial_dim = self.chunk_size // (2 ** len(self.hidden_dims))
-        reshaped = decoded.reshape(-1, last_h_dim, spatial_dim, spatial_dim, spatial_dim)
-        
+        reshaped = decoded.reshape(
+            -1, last_h_dim, spatial_dim, spatial_dim, spatial_dim
+        )
+
         # Decode
         decoded = self.decoder(reshaped)
-        
+
         # Predict block types
         logits = self.block_predictor(decoded)
-        
+
         # Permute to get the block dimension at the end
         logits = logits.permute(0, 2, 3, 4, 1)
-        
+
         return logits
-    
+
     def _reparameterize_impl(self, mu, log_var):
         """
         Internal implementation of reparameterize for JIT compilation.
-        
+
         Args:
             mu (torch.Tensor): Mean of the latent Gaussian
             log_var (torch.Tensor): Log variance of the latent Gaussian
-            
+
         Returns:
             torch.Tensor: Sampled latent vector
         """
@@ -258,68 +269,68 @@ class MinecraftVAE(nn.Module):
             tuple: (mu, log_var) of the latent space
         """
         # Use JIT compiled version if available
-        if self.use_jit and hasattr(self, '_encode_jit'):
+        if self.use_jit and hasattr(self, "_encode_jit"):
             return self._encode_jit(x, mask)
-        
+
         # Use gradient checkpointing if requested
         if self.use_checkpointing and self.training and torch.is_grad_enabled():
             # Embed the blocks
             embedded = self.block_embedding(x)
-            
+
             # Permute to get the embedding dimension as channels
             embedded = embedded.permute(0, 4, 1, 2, 3)
-            
+
             # Apply mask if provided
             if mask is not None:
                 mask_expanded = mask.unsqueeze(1)
                 embedded = embedded * mask_expanded
                 del mask_expanded
-            
+
             # Use checkpointing for the encoder to save memory during training
-            if hasattr(torch.utils.checkpoint, 'checkpoint'):
+            if hasattr(torch.utils.checkpoint, "checkpoint"):
                 encoded = torch.utils.checkpoint.checkpoint(self.encoder, embedded)
             else:
                 encoded = self.encoder(embedded)
-            
+
             del embedded
-            
+
             # Flatten
             flattened = encoded.reshape(encoded.size(0), -1)
             del encoded
-            
+
             # Get latent parameters
             mu = self.fc_mu(flattened)
             log_var = self.fc_var(flattened)
             del flattened
-            
+
             return mu, log_var
         else:
             # Standard implementation
             # Embed the blocks
             embedded = self.block_embedding(x)
-            
+
             # Permute to get the embedding dimension as channels
             embedded = embedded.permute(0, 4, 1, 2, 3)
-            
+
             # Apply mask if provided
             if mask is not None:
                 mask_expanded = mask.unsqueeze(1)
                 embedded = embedded * mask_expanded
                 del mask_expanded
-            
+
             # Encode
             encoded = self.encoder(embedded)
             del embedded
-            
+
             # Flatten
             flattened = encoded.reshape(encoded.size(0), -1)
             del encoded
-            
+
             # Get latent parameters
             mu = self.fc_mu(flattened)
             log_var = self.fc_var(flattened)
             del flattened
-            
+
             return mu, log_var
 
     def decode(self, z):
@@ -333,58 +344,62 @@ class MinecraftVAE(nn.Module):
             torch.Tensor: Reconstructed blocks of shape (batch_size, chunk_size, chunk_size, chunk_size, num_blocks)
         """
         # Use JIT compiled version if available
-        if self.use_jit and hasattr(self, '_decode_jit'):
+        if self.use_jit and hasattr(self, "_decode_jit"):
             return self._decode_jit(z)
-        
+
         # Use gradient checkpointing if requested
         if self.use_checkpointing and self.training and torch.is_grad_enabled():
             # Decode from latent space
             decoded = self.decoder_input(z)
-            
+
             # Reshape to 3D volume
             last_h_dim = self.hidden_dims[-1]
             spatial_dim = self.chunk_size // (2 ** len(self.hidden_dims))
-            reshaped = decoded.reshape(-1, last_h_dim, spatial_dim, spatial_dim, spatial_dim)
+            reshaped = decoded.reshape(
+                -1, last_h_dim, spatial_dim, spatial_dim, spatial_dim
+            )
             del decoded
-            
+
             # Use checkpointing for the decoder to save memory during training
-            if hasattr(torch.utils.checkpoint, 'checkpoint'):
+            if hasattr(torch.utils.checkpoint, "checkpoint"):
                 decoded = torch.utils.checkpoint.checkpoint(self.decoder, reshaped)
             else:
                 decoded = self.decoder(reshaped)
-            
+
             del reshaped
-            
+
             # Predict block types
             logits = self.block_predictor(decoded)
             del decoded
-            
+
             # Permute to get the block dimension at the end
             logits = logits.permute(0, 2, 3, 4, 1)
-            
+
             return logits
         else:
             # Standard implementation
             # Decode from latent space
             decoded = self.decoder_input(z)
-            
+
             # Reshape to 3D volume
             last_h_dim = self.hidden_dims[-1]
             spatial_dim = self.chunk_size // (2 ** len(self.hidden_dims))
-            reshaped = decoded.reshape(-1, last_h_dim, spatial_dim, spatial_dim, spatial_dim)
+            reshaped = decoded.reshape(
+                -1, last_h_dim, spatial_dim, spatial_dim, spatial_dim
+            )
             del decoded
-            
+
             # Decode
             decoded = self.decoder(reshaped)
             del reshaped
-            
+
             # Predict block types
             logits = self.block_predictor(decoded)
             del decoded
-            
+
             # Permute to get the block dimension at the end
             logits = logits.permute(0, 2, 3, 4, 1)
-            
+
             return logits
 
     def reparameterize(self, mu, log_var):
@@ -399,17 +414,17 @@ class MinecraftVAE(nn.Module):
             torch.Tensor: Sampled latent vector
         """
         # Use JIT compiled version if available
-        if self.use_jit and hasattr(self, '_reparameterize_jit'):
+        if self.use_jit and hasattr(self, "_reparameterize_jit"):
             return self._reparameterize_jit(mu, log_var)
-        
+
         # Standard implementation
         std = torch.exp(0.5 * log_var)
         eps = torch.randn_like(std)
         z = mu + eps * std
-        
+
         # Free memory
         del std, eps
-        
+
         return z
 
     def forward(self, x, mask=None):
@@ -431,7 +446,7 @@ class MinecraftVAE(nn.Module):
 
         # Decode
         reconstructed = self.decode(z)
-        
+
         # Free memory
         del z
 
@@ -453,7 +468,7 @@ class MinecraftVAE(nn.Module):
 
         # Decode
         samples = self.decode(z)
-        
+
         # Free memory
         del z
 
@@ -461,7 +476,7 @@ class MinecraftVAE(nn.Module):
         # samples shape: (num_samples, chunk_size, chunk_size, chunk_size, num_blocks)
         # blocks shape: (num_samples, chunk_size, chunk_size, chunk_size)
         blocks = torch.argmax(samples, dim=-1)
-        
+
         # Free memory
         del samples
 
@@ -719,39 +734,40 @@ def calculate_class_weights(
 
 @torch.jit.script
 def _focal_loss_impl(
-    log_probs: torch.Tensor, 
-    target_flat: torch.Tensor, 
-    gamma: float, 
-    alpha: Optional[torch.Tensor] = None
+    log_probs: torch.Tensor,
+    target_flat: torch.Tensor,
+    gamma: float,
+    alpha: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Optimized implementation of focal loss for JIT compilation.
-    
+
     Args:
         log_probs: Log probabilities from softmax
         target_flat: Flattened target indices
         gamma: Focusing parameter
         alpha: Optional class weights
-        
+
     Returns:
         Focal loss tensor
     """
     # Get the probabilities for the target class
     probs = torch.exp(log_probs)
     target_probs = probs.gather(1, target_flat.unsqueeze(1)).squeeze(1)
-    
+
     # Calculate focal weight: (1 - p_t)^gamma
     focal_weight = (1 - target_probs).pow(gamma)
-    
+
     # Apply alpha weighting if provided
     if alpha is not None:
         alpha_t = alpha.gather(0, target_flat)
         focal_weight = alpha_t * focal_weight
-    
+
     # Calculate focal loss: -alpha_t * (1 - p_t)^gamma * log(p_t)
     loss = -focal_weight * log_probs.gather(1, target_flat.unsqueeze(1)).squeeze(1)
-    
+
     return loss
+
 
 def vae_loss_function(
     reconstructed,
@@ -789,16 +805,16 @@ def vae_loss_function(
     batch_size = reconstructed.size(0)
     reconstructed_flat = reconstructed.contiguous().view(-1, reconstructed.size(-1))
     target_flat = target.contiguous().view(-1)
-    
+
     # Calculate reconstruction loss
     if use_focal_loss:
         # Compute log softmax once for efficiency
         log_probs = F.log_softmax(reconstructed_flat, dim=-1)
-        
+
         # Use optimized focal loss implementation
         if alpha is None and class_weights is not None:
             alpha = class_weights
-            
+
         recon_loss = _focal_loss_impl(log_probs, target_flat, gamma, alpha)
     else:
         # Use standard cross-entropy loss with optimized implementation
@@ -822,10 +838,10 @@ def vae_loss_function(
     if mask is not None:
         # Reshape mask to match recon_loss - use view for better performance
         mask_flat = mask.contiguous().view(-1)
-        
+
         # Apply mask
         recon_loss = recon_loss * mask_flat
-        
+
         # Take mean over valid positions
         valid_positions = mask_flat.sum()
         if valid_positions > 0:
@@ -1099,16 +1115,20 @@ def train_vae(
 
     # Create checkpoint directory if it doesn't exist
     os.makedirs(checkpoint_dir, exist_ok=True)
-    
+
     # Enable gradient checkpointing if requested (saves memory)
-    if checkpoint_activation and hasattr(vae, 'encoder'):
-        vae.encoder.apply(lambda m: m.register_forward_hook(lambda m, _, output: output.requires_grad_(True)))
-    
+    if checkpoint_activation and hasattr(vae, "encoder"):
+        vae.encoder.apply(
+            lambda m: m.register_forward_hook(
+                lambda m, _, output: output.requires_grad_(True)
+            )
+        )
+
     # Initialize gradient scaler for mixed precision training
     scaler = GradScaler() if use_amp and torch.cuda.is_available() else None
-    
+
     # Optimize dataloader if it's not already optimized
-    if hasattr(dataloader, 'num_workers') and dataloader.num_workers < num_workers:
+    if hasattr(dataloader, "num_workers") and dataloader.num_workers < num_workers:
         # Create a new dataloader with optimized settings
         optimized_dataloader = DataLoader(
             dataloader.dataset,
@@ -1117,7 +1137,7 @@ def train_vae(
             num_workers=num_workers,
             pin_memory=pin_memory,
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
-            persistent_workers=True if num_workers > 0 else False
+            persistent_workers=True if num_workers > 0 else False,
         )
         dataloader = optimized_dataloader
 
@@ -1151,13 +1171,13 @@ def train_vae(
             epoch_kld_loss = 0
             epoch_correct = 0
             epoch_valid_positions = 0
-            
+
             # Track time for performance monitoring
             epoch_start_time = time.time()
 
             progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs}")
             optimizer.zero_grad()  # Zero gradients once at the beginning of epoch
-            
+
             for batch_idx, batch in enumerate(progress_bar):
                 # Get data
                 blocks = batch["blocks"].to(device, non_blocking=True)
@@ -1167,7 +1187,7 @@ def train_vae(
                 if use_amp and torch.cuda.is_available():
                     with autocast():
                         reconstructed, mu, log_var = vae(blocks, mask)
-                        
+
                         # Calculate loss
                         loss, recon_loss, kld_loss = vae_loss_function(
                             reconstructed,
@@ -1181,31 +1201,31 @@ def train_vae(
                             gamma=focal_gamma,
                             alpha=focal_alpha,
                         )
-                        
+
                         # Scale loss for gradient accumulation
                         loss = loss / gradient_accumulation_steps
-                    
+
                     # Backward pass with scaler
                     scaler.scale(loss).backward()
-                    
+
                     # Only step optimizer and scaler after accumulating gradients
                     if (batch_idx + 1) % gradient_accumulation_steps == 0:
                         # Clip gradients
                         scaler.unscale_(optimizer)
                         torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
-                        
+
                         # Update weights
                         scaler.step(optimizer)
                         scaler.update()
                         optimizer.zero_grad()
-                        
+
                         # Step the scheduler if provided
                         if scheduler is not None:
                             scheduler.step()
                 else:
                     # Standard precision training
                     reconstructed, mu, log_var = vae(blocks, mask)
-                    
+
                     # Calculate loss
                     loss, recon_loss, kld_loss = vae_loss_function(
                         reconstructed,
@@ -1219,31 +1239,33 @@ def train_vae(
                         gamma=focal_gamma,
                         alpha=focal_alpha,
                     )
-                    
+
                     # Scale loss for gradient accumulation
                     loss = loss / gradient_accumulation_steps
-                    
+
                     # Backward pass
                     loss.backward()
-                    
+
                     # Only step optimizer after accumulating gradients
                     if (batch_idx + 1) % gradient_accumulation_steps == 0:
                         # Clip gradients
                         torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
-                        
+
                         # Update weights
                         optimizer.step()
                         optimizer.zero_grad()
-                        
+
                         # Step the scheduler if provided
                         if scheduler is not None:
                             scheduler.step()
-                
+
                 # Extract scalar values to prevent memory leaks
-                loss_value = loss.item() * gradient_accumulation_steps  # Scale back for reporting
+                loss_value = (
+                    loss.item() * gradient_accumulation_steps
+                )  # Scale back for reporting
                 recon_loss_value = recon_loss.item()
                 kld_loss_value = kld_loss.item()
-                
+
                 # Free memory
                 del loss, recon_loss, kld_loss
 
@@ -1264,10 +1286,10 @@ def train_vae(
                     mask_sum = mask.sum().item()
                     epoch_correct += correct_sum
                     epoch_valid_positions += mask_sum
-                    
+
                     # Free memory
                     del pred_blocks, correct
-                
+
                 # Free memory from forward pass
                 del reconstructed, mu, log_var, blocks, mask
 
@@ -1275,11 +1297,11 @@ def train_vae(
                 epoch_loss += loss_value
                 epoch_recon_loss += recon_loss_value
                 epoch_kld_loss += kld_loss_value
-                
+
                 # Explicitly clear CUDA cache periodically
                 if batch_idx % 10 == 0 and torch.cuda.is_available():
                     torch.cuda.empty_cache()
-            
+
             # Force garbage collection at the end of each epoch
             gc.collect()
             if torch.cuda.is_available():
@@ -1377,7 +1399,7 @@ def train_vae(
                     filename=checkpoint_path,
                 )
                 print(f"Checkpoint saved at epoch {epoch + 1}")
-                
+
             # Clear memory at the end of each epoch
             if device == "cuda":
                 torch.cuda.empty_cache()
@@ -1440,9 +1462,11 @@ def evaluate_vae(
     """
     # Start timing
     start_time = time.time()
-    
+
     # Optimize dataloader if needed
-    if batch_size is not None or (hasattr(dataloader, 'num_workers') and dataloader.num_workers < num_workers):
+    if batch_size is not None or (
+        hasattr(dataloader, "num_workers") and dataloader.num_workers < num_workers
+    ):
         # Create a new dataloader with optimized settings
         optimized_dataloader = DataLoader(
             dataloader.dataset,
@@ -1451,10 +1475,10 @@ def evaluate_vae(
             num_workers=num_workers,
             pin_memory=pin_memory,
             prefetch_factor=2 if num_workers > 0 else None,
-            persistent_workers=True if num_workers > 0 else False
+            persistent_workers=True if num_workers > 0 else False,
         )
         dataloader = optimized_dataloader
-    
+
     vae.eval()
     total_loss = 0
     total_recon_loss = 0
@@ -1464,7 +1488,7 @@ def evaluate_vae(
 
     # Sample some examples for visualization
     samples = []
-    
+
     # Use tqdm for progress tracking
     progress_bar = tqdm(dataloader, desc="Evaluating", disable=not verbose)
 
@@ -1478,7 +1502,7 @@ def evaluate_vae(
             if use_amp and torch.cuda.is_available():
                 with autocast():
                     reconstructed, mu, log_var = vae(blocks, mask)
-                    
+
                     # Calculate loss
                     loss, recon_loss, kld_loss = vae_loss_function(
                         reconstructed,
@@ -1493,7 +1517,7 @@ def evaluate_vae(
             else:
                 # Standard precision evaluation
                 reconstructed, mu, log_var = vae(blocks, mask)
-                
+
                 # Calculate loss
                 loss, recon_loss, kld_loss = vae_loss_function(
                     reconstructed,
@@ -1510,12 +1534,12 @@ def evaluate_vae(
             loss_value = loss.item()
             recon_loss_value = recon_loss.item()
             kld_loss_value = kld_loss.item()
-            
+
             # Update totals
             total_loss += loss_value
             total_recon_loss += recon_loss_value
             total_kld_loss += kld_loss_value
-            
+
             # Free memory
             del loss, recon_loss, kld_loss
 
@@ -1524,31 +1548,32 @@ def evaluate_vae(
             correct = (pred_blocks == blocks) & (mask.bool())
             correct_sum = correct.sum().item()
             mask_sum = mask.sum().item()
-            
+
             # Update metrics
             total_correct += correct_sum
             total_valid_positions += mask_sum
-            
+
             # Update progress bar
             if verbose:
                 current_accuracy = correct_sum / mask_sum if mask_sum > 0 else 0
-                progress_bar.set_postfix({
-                    "loss": f"{loss_value:.4f}",
-                    "acc": f"{current_accuracy:.4f}"
-                })
+                progress_bar.set_postfix(
+                    {"loss": f"{loss_value:.4f}", "acc": f"{current_accuracy:.4f}"}
+                )
 
             # Store samples for visualization (only if needed)
             if i < num_samples and num_samples > 0:
                 # Store only what's needed and immediately detach and move to CPU
-                samples.append({
-                    "input": blocks[0].cpu().detach(),
-                    "mask": mask[0].cpu().detach(),
-                    "reconstructed": pred_blocks[0].cpu().detach(),
-                })
-                
+                samples.append(
+                    {
+                        "input": blocks[0].cpu().detach(),
+                        "mask": mask[0].cpu().detach(),
+                        "reconstructed": pred_blocks[0].cpu().detach(),
+                    }
+                )
+
             # Free memory
             del blocks, mask, reconstructed, mu, log_var, pred_blocks, correct
-            
+
             # Clear CUDA cache periodically (every 5 batches)
             if i % 5 == 0 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -1558,7 +1583,7 @@ def evaluate_vae(
     avg_recon_loss = total_recon_loss / len(dataloader)
     avg_kld_loss = total_kld_loss / len(dataloader)
     accuracy = total_correct / total_valid_positions if total_valid_positions > 0 else 0
-    
+
     # Calculate elapsed time
     elapsed_time = time.time() - start_time
 
