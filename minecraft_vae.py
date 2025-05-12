@@ -802,6 +802,8 @@ def train_vae(
     use_focal_loss=False,
     focal_gamma=2.0,
     focal_alpha=None,
+    save_interval=5,  # Save model every N epochs
+    checkpoint_dir="models/checkpoints",  # Directory to save checkpoints
 ):
     """
     Train the VAE.
@@ -820,11 +822,17 @@ def train_vae(
         use_focal_loss (bool): Whether to use focal loss instead of cross-entropy
         focal_gamma (float): Focusing parameter for focal loss (higher values focus more on hard examples)
         focal_alpha (torch.Tensor, optional): Alpha weighting for focal loss (can be same as class_weights)
+        save_interval (int): Save model checkpoint every N epochs
+        checkpoint_dir (str): Directory to save checkpoints
 
     Returns:
         list: Training losses
     """
     losses = []
+    start_epoch = 0
+    
+    # Create checkpoint directory if it doesn't exist
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Calculate class weights if needed
     class_weights = None
@@ -843,132 +851,150 @@ def train_vae(
             force_recount=force_recount
         )
 
-    for epoch in range(epochs):
-        # Training phase
-        vae.train()
-        epoch_loss = 0
-        epoch_recon_loss = 0
-        epoch_kld_loss = 0
-        epoch_correct = 0
-        epoch_valid_positions = 0
+    try:
+        for epoch in range(start_epoch, epochs):
+            # Training phase
+            vae.train()
+            epoch_loss = 0
+            epoch_recon_loss = 0
+            epoch_kld_loss = 0
+            epoch_correct = 0
+            epoch_valid_positions = 0
 
-        progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs}")
-        for batch in progress_bar:
-            # Get data
-            blocks = batch["blocks"].to(device)
-            mask = batch["mask"].to(device)
+            progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs}")
+            for batch in progress_bar:
+                # Get data
+                blocks = batch["blocks"].to(device)
+                mask = batch["mask"].to(device)
 
-            # Forward pass
-            reconstructed, mu, log_var = vae(blocks, mask)
+                # Forward pass
+                reconstructed, mu, log_var = vae(blocks, mask)
 
-            # Calculate loss
-            loss, recon_loss, kld_loss = vae_loss_function(
-                reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights,
-                use_focal_loss=use_focal_loss, gamma=focal_gamma, alpha=focal_alpha
+                # Calculate loss
+                loss, recon_loss, kld_loss = vae_loss_function(
+                    reconstructed, blocks, mu, log_var, mask, kld_weight, class_weights,
+                    use_focal_loss=use_focal_loss, gamma=focal_gamma, alpha=focal_alpha
+                )
+
+                # Backward pass
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
+                optimizer.step()
+                
+                # Step the scheduler if provided
+                if scheduler is not None:
+                    scheduler.step()
+                    # Update progress bar to show current learning rate
+                    current_lr = scheduler.get_last_lr()[0]
+                    progress_bar.set_postfix({"loss": f"{loss.item():.4f}", "lr": f"{current_lr:.6f}"})
+
+                # Calculate accuracy
+                with torch.no_grad():
+                    pred_blocks = torch.argmax(reconstructed, dim=-1)
+                    correct = (pred_blocks == blocks) & (mask.bool())
+                    epoch_correct += correct.sum().item()
+                    epoch_valid_positions += mask.sum().item()
+
+                # Update progress bar
+                epoch_loss += loss.item()
+                epoch_recon_loss += recon_loss.item()
+                epoch_kld_loss += kld_loss.item()
+
+                # Calculate current accuracy
+                current_accuracy = (
+                    epoch_correct / epoch_valid_positions
+                    if epoch_valid_positions > 0
+                    else 0
+                )
+
+                progress_bar.set_postfix(
+                    {
+                        "loss": epoch_loss / (progress_bar.n + 1),
+                        "recon_loss": epoch_recon_loss / (progress_bar.n + 1),
+                        "kld_loss": epoch_kld_loss / (progress_bar.n + 1),
+                        "acc": current_accuracy,
+                    }
+                )
+
+            # Calculate average losses and accuracy
+            avg_loss = epoch_loss / len(dataloader)
+            avg_recon_loss = epoch_recon_loss / len(dataloader)
+            avg_kld_loss = epoch_kld_loss / len(dataloader)
+            avg_accuracy = (
+                epoch_correct / epoch_valid_positions if epoch_valid_positions > 0 else 0
             )
 
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
-            optimizer.step()
-            
-            # Step the scheduler if provided
-            if scheduler is not None:
-                scheduler.step()
-                # Update progress bar to show current learning rate
-                current_lr = scheduler.get_last_lr()[0]
-                progress_bar.set_postfix({"loss": f"{loss.item():.4f}", "lr": f"{current_lr:.6f}"})
-
-            # Calculate accuracy
-            with torch.no_grad():
-                pred_blocks = torch.argmax(reconstructed, dim=-1)
-                correct = (pred_blocks == blocks) & (mask.bool())
-                epoch_correct += correct.sum().item()
-                epoch_valid_positions += mask.sum().item()
-
-            # Update progress bar
-            epoch_loss += loss.item()
-            epoch_recon_loss += recon_loss.item()
-            epoch_kld_loss += kld_loss.item()
-
-            # Calculate current accuracy
-            current_accuracy = (
-                epoch_correct / epoch_valid_positions
-                if epoch_valid_positions > 0
-                else 0
-            )
-
-            progress_bar.set_postfix(
-                {
-                    "loss": epoch_loss / (progress_bar.n + 1),
-                    "recon_loss": epoch_recon_loss / (progress_bar.n + 1),
-                    "kld_loss": epoch_kld_loss / (progress_bar.n + 1),
-                    "acc": current_accuracy,
-                }
-            )
-
-        # Calculate average losses and accuracy
-        avg_loss = epoch_loss / len(dataloader)
-        avg_recon_loss = epoch_recon_loss / len(dataloader)
-        avg_kld_loss = epoch_kld_loss / len(dataloader)
-        avg_accuracy = (
-            epoch_correct / epoch_valid_positions if epoch_valid_positions > 0 else 0
-        )
-
-        print(f"Epoch {epoch + 1}/{epochs}:")
-        print(f"  Train Loss: {avg_loss:.4f}")
-        print(f"  Train Reconstruction Loss: {avg_recon_loss:.4f}")
-        print(f"  Train KLD Loss: {avg_kld_loss:.4f}")
-        print(
-            f"  Train Accuracy: {avg_accuracy:.4f} ({epoch_correct}/{epoch_valid_positions})"
-        )
-
-        # Validation phase
-        if val_dataloader is not None:
-            # Use the evaluate_vae function with verbose=False to avoid duplicate printing
-            val_results = evaluate_vae(
-                vae=vae,
-                dataloader=val_dataloader,
-                device=device,
-                kld_weight=kld_weight,
-                num_samples=0,  # Don't need samples during training
-                verbose=False,
-                class_weights=class_weights,
-                use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
-            )
-
-            # Print validation results
-            print(f"  Val Loss: {val_results['loss']:.4f}")
-            print(f"  Val Reconstruction Loss: {val_results['recon_loss']:.4f}")
-            print(f"  Val KLD Loss: {val_results['kld_loss']:.4f}")
+            print(f"Epoch {epoch + 1}/{epochs}:")
+            print(f"  Train Loss: {avg_loss:.4f}")
+            print(f"  Train Reconstruction Loss: {avg_recon_loss:.4f}")
+            print(f"  Train KLD Loss: {avg_kld_loss:.4f}")
             print(
-                f"  Val Accuracy: {val_results['accuracy']:.4f} ({val_results['correct']}/{val_results['total']})"
+                f"  Train Accuracy: {avg_accuracy:.4f} ({epoch_correct}/{epoch_valid_positions})"
             )
 
-            # Save loss with validation
-            losses.append(
-                {
-                    "total": avg_loss,
-                    "reconstruction": avg_recon_loss,
-                    "kld": avg_kld_loss,
-                    "accuracy": avg_accuracy,
-                    "val_total": val_results["loss"],
-                    "val_reconstruction": val_results["recon_loss"],
-                    "val_kld": val_results["kld_loss"],
-                    "val_accuracy": val_results["accuracy"],
-                }
-            )
-        else:
-            # Save loss without validation
-            losses.append(
-                {
-                    "total": avg_loss,
-                    "reconstruction": avg_recon_loss,
-                    "kld": avg_kld_loss,
-                    "accuracy": avg_accuracy,
-                }
-            )
+            # Validation phase
+            if val_dataloader is not None:
+                # Use the evaluate_vae function with verbose=False to avoid duplicate printing
+                val_results = evaluate_vae(
+                    vae=vae,
+                    dataloader=val_dataloader,
+                    device=device,
+                    kld_weight=kld_weight,
+                    num_samples=0,  # Don't need samples during training
+                    verbose=False,
+                    class_weights=class_weights,
+                    use_focal_loss=False  # Don't use focal loss for evaluation to keep metrics comparable
+                )
+
+                # Print validation results
+                print(f"  Val Loss: {val_results['loss']:.4f}")
+                print(f"  Val Reconstruction Loss: {val_results['recon_loss']:.4f}")
+                print(f"  Val KLD Loss: {val_results['kld_loss']:.4f}")
+                print(
+                    f"  Val Accuracy: {val_results['accuracy']:.4f} ({val_results['correct']}/{val_results['total']})"
+                )
+
+                # Save loss with validation
+                losses.append(
+                    {
+                        "total": avg_loss,
+                        "reconstruction": avg_recon_loss,
+                        "kld": avg_kld_loss,
+                        "accuracy": avg_accuracy,
+                        "val_total": val_results["loss"],
+                        "val_reconstruction": val_results["recon_loss"],
+                        "val_kld": val_results["kld_loss"],
+                        "val_accuracy": val_results["accuracy"],
+                    }
+                )
+            else:
+                # Save loss without validation
+                losses.append(
+                    {
+                        "total": avg_loss,
+                        "reconstruction": avg_recon_loss,
+                        "kld": avg_kld_loss,
+                        "accuracy": avg_accuracy,
+                    }
+                )
+                
+            # Save checkpoint if needed
+            if (epoch + 1) % save_interval == 0:
+                checkpoint_path = os.path.join(checkpoint_dir, f"vae_checkpoint_epoch_{epoch+1}.pth")
+                save_vae(vae=vae, optimizer=optimizer, losses=losses, filename=checkpoint_path)
+                print(f"Checkpoint saved at epoch {epoch+1}")
+                
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user. Saving model...")
+        # Save the model at the current state
+        interrupted_path = os.path.join(checkpoint_dir, "vae_interrupted.pth")
+        save_vae(vae=vae, optimizer=optimizer, losses=losses, filename=interrupted_path)
+        print(f"Model saved to {interrupted_path}")
+        
+        # Also save to the default location
+        save_vae(vae=vae, optimizer=optimizer, losses=losses, filename="models/minecraft_vae.pth")
+        print("Model also saved to models/minecraft_vae.pth")
 
     return losses
 
@@ -1168,6 +1194,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable focal loss (overrides --use-focal-loss)"
     )
+    parser.add_argument(
+        "--save-interval",
+        type=int,
+        default=5,
+        help="Save checkpoint every N epochs (default: 5)"
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default="models/checkpoints",
+        help="Directory to save checkpoints (default: models/checkpoints)"
+    )
     args = parser.parse_args()
     
     # Set device
@@ -1252,6 +1290,8 @@ if __name__ == "__main__":
         use_focal_loss=args.use_focal_loss and not args.no_focal_loss,  # Use focal loss if enabled and not disabled
         focal_gamma=args.focal_gamma,  # Use gamma value from command-line arguments
         focal_alpha=None,  # Use class_weights as alpha
+        save_interval=args.save_interval,  # Save checkpoint every N epochs from command-line
+        checkpoint_dir=args.checkpoint_dir,  # Directory to save checkpoints from command-line
     )
 
     # Evaluate the VAE
