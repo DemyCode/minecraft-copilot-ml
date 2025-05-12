@@ -1575,18 +1575,16 @@ def evaluate_vae(
             # Update metrics
             total_correct += correct_sum
             total_valid_positions += mask_sum
-
+            
             # Update progress bar with detailed metrics
             if verbose:
                 current_accuracy = correct_sum / mask_sum if mask_sum > 0 else 0
-                progress_bar.set_postfix(
-                    {
-                        "loss": f"{loss_value:.4f}",
-                        "recon_loss": f"{recon_loss_value:.4f}",
-                        "kld_loss": f"{kld_loss_value:.4f}",
-                        "acc": f"{current_accuracy:.4f}",
-                    }
-                )
+                progress_bar.set_postfix({
+                    "loss": f"{loss_value:.4f}",
+                    "recon_loss": f"{recon_loss_value:.4f}",
+                    "kld_loss": f"{kld_loss_value:.4f}",
+                    "acc": f"{current_accuracy:.4f}"
+                })
 
             # Store samples for visualization (only if needed)
             if i < num_samples and num_samples > 0:
