@@ -1269,14 +1269,30 @@ def train_vae(
                 # Free memory
                 del loss, recon_loss, kld_loss
 
-                # Update progress bar with current learning rate
+                # Calculate current accuracy for progress bar
+                current_accuracy = correct_sum / mask_sum if mask_sum > 0 else 0
+
+                # Update progress bar with detailed metrics
                 if scheduler is not None:
                     current_lr = scheduler.get_last_lr()[0]
                     progress_bar.set_postfix(
-                        {"loss": f"{loss_value:.4f}", "lr": f"{current_lr:.6f}"}
+                        {
+                            "loss": f"{loss_value:.4f}",
+                            "recon_loss": f"{recon_loss_value:.4f}",
+                            "kld_loss": f"{kld_loss_value:.4f}",
+                            "acc": f"{current_accuracy:.4f}",
+                            "lr": f"{current_lr:.6f}",
+                        }
                     )
                 else:
-                    progress_bar.set_postfix({"loss": f"{loss_value:.4f}"})
+                    progress_bar.set_postfix(
+                        {
+                            "loss": f"{loss_value:.4f}",
+                            "recon_loss": f"{recon_loss_value:.4f}",
+                            "kld_loss": f"{kld_loss_value:.4f}",
+                            "acc": f"{current_accuracy:.4f}",
+                        }
+                    )
 
                 # Calculate accuracy (use torch operations instead of item() where possible)
                 with torch.no_grad():
@@ -1333,7 +1349,12 @@ def train_vae(
                 else 0
             )
 
-            print(f"Epoch {epoch + 1}/{epochs}:")
+            # Calculate elapsed time for the epoch
+            epoch_elapsed_time = time.time() - epoch_start_time
+
+            print(
+                f"Epoch {epoch + 1}/{epochs} completed in {epoch_elapsed_time:.2f} seconds:"
+            )
             print(f"  Train Loss: {avg_loss:.4f}")
             print(f"  Train Reconstruction Loss: {avg_recon_loss:.4f}")
             print(f"  Train KLD Loss: {avg_kld_loss:.4f}")
@@ -1355,8 +1376,10 @@ def train_vae(
                     use_focal_loss=False,  # Don't use focal loss for evaluation to keep metrics comparable
                 )
 
-                # Print validation results
-                print(f"  Val Loss: {val_results['loss']:.4f}")
+                # Print validation results with elapsed time
+                print(
+                    f"  Val Loss: {val_results['loss']:.4f} (completed in {val_results['elapsed_time']:.2f} seconds)"
+                )
                 print(f"  Val Reconstruction Loss: {val_results['recon_loss']:.4f}")
                 print(f"  Val KLD Loss: {val_results['kld_loss']:.4f}")
                 print(
@@ -1553,11 +1576,16 @@ def evaluate_vae(
             total_correct += correct_sum
             total_valid_positions += mask_sum
 
-            # Update progress bar
+            # Update progress bar with detailed metrics
             if verbose:
                 current_accuracy = correct_sum / mask_sum if mask_sum > 0 else 0
                 progress_bar.set_postfix(
-                    {"loss": f"{loss_value:.4f}", "acc": f"{current_accuracy:.4f}"}
+                    {
+                        "loss": f"{loss_value:.4f}",
+                        "recon_loss": f"{recon_loss_value:.4f}",
+                        "kld_loss": f"{kld_loss_value:.4f}",
+                        "acc": f"{current_accuracy:.4f}",
+                    }
                 )
 
             # Store samples for visualization (only if needed)
