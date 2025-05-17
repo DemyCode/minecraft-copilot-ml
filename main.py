@@ -104,12 +104,38 @@ if __name__ == "__main__":
     os.makedirs(savedir, exist_ok=True)
     for num_epoch in tqdm(range(EPOCHS)):
         for step_i, data in tqdm(enumerate(train_dataloader)):
-            x = data["blocks"]
+            # Get block data and mask
+            blocks = data["blocks"]
             mask = data["mask"]
-            # Use the device variable defined earlier
-            x = x.to(device)
+            
+            # Move to device
+            blocks = blocks.to(device)
             mask = mask.to(device)
-            x = x.float()
+            
+            # One-hot encode the blocks
+            # blocks is expected to contain integer indices
+            num_classes = len(dataset.block_to_idx)
+            print(f"One-hot encoding blocks with {num_classes} classes")
+            print(f"Original blocks shape: {blocks.shape}, min: {blocks.min()}, max: {blocks.max()}")
+            
+            # Ensure block indices are within valid range
+            blocks_clamped = torch.clamp(blocks.long(), 0, num_classes - 1)
+            
+            # Create one-hot encoded tensor using PyTorch's built-in function
+            # First reshape blocks to be a 1D tensor of indices
+            batch_size, depth, height, width = blocks.shape
+            blocks_flat = blocks_clamped.reshape(-1)
+            
+            # Create one-hot encoding
+            one_hot_flat = torch.zeros(blocks_flat.size(0), num_classes, device=device)
+            one_hot_flat.scatter_(1, blocks_flat.unsqueeze(1), 1.0)
+            
+            # Reshape back to original dimensions with channels
+            x = one_hot_flat.reshape(batch_size, depth, height, width, num_classes)
+            # Permute to get channels as the second dimension [batch, channels, depth, height, width]
+            x = x.permute(0, 4, 1, 2, 3)
+            
+            print(f"One-hot encoded x shape: {x.shape}")
             x0 = torch.randn_like(x)  # This will be on the same device as x
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x)
             # Ensure all tensors are on the same device
@@ -122,21 +148,48 @@ if __name__ == "__main__":
             print(f"xt shape: {xt.shape}, t shape: {t.shape}, ut shape: {ut.shape}")
             print(f"Model in_channels: {model.in_channels}, model_channels: {model.model_channels}")
             
-            # The model expects input with in_channels=model.in_channels
-            # But xt might have different channels, so we need to reshape it
+            # With one-hot encoding, xt and ut should already have the correct number of channels
+            # But let's check and fix if needed
             if xt.shape[1] != model.in_channels:
-                print(f"Reshaping xt from {xt.shape[1]} channels to {model.in_channels} channels")
-                # Reshape xt to match the expected input channels
-                xt_reshaped = torch.zeros(xt.shape[0], model.in_channels, 
+                print(f"Warning: xt has {xt.shape[1]} channels but model expects {model.in_channels}")
+                if xt.shape[1] < model.in_channels:
+                    # Pad with zeros if we have fewer channels than needed
+                    padding = torch.zeros(xt.shape[0], model.in_channels - xt.shape[1], 
                                          xt.shape[2], xt.shape[3], xt.shape[4], 
                                          device=device)
-                # Copy the data from xt to the first channels of xt_reshaped
-                min_channels = min(xt.shape[1], model.in_channels)
-                xt_reshaped[:, :min_channels] = xt[:, :min_channels]
-                xt = xt_reshaped
-                print(f"Reshaped xt to: {xt.shape}")
+                    xt = torch.cat([xt, padding], dim=1)
+                else:
+                    # Truncate if we have more channels than needed
+                    xt = xt[:, :model.in_channels]
+                print(f"Adjusted xt shape: {xt.shape}")
+                
+            # Similarly, ensure ut has the correct number of channels
+            if ut.shape[1] != model.out_channels:
+                print(f"Warning: ut has {ut.shape[1]} channels but model outputs {model.out_channels}")
+                if ut.shape[1] < model.out_channels:
+                    # Pad with zeros if we have fewer channels than needed
+                    padding = torch.zeros(ut.shape[0], model.out_channels - ut.shape[1], 
+                                         ut.shape[2], ut.shape[3], ut.shape[4], 
+                                         device=device)
+                    ut = torch.cat([ut, padding], dim=1)
+                else:
+                    # Truncate if we have more channels than needed
+                    ut = ut[:, :model.out_channels]
+                print(f"Adjusted ut shape: {ut.shape}")
                 
             vt = model(t, xt)
+            print(f"Model output vt shape: {vt.shape}")
+            
+            # Double-check that vt and ut have the same shape for the loss calculation
+            if vt.shape != ut.shape:
+                print(f"Warning: vt shape {vt.shape} doesn't match ut shape {ut.shape}")
+                # Make them compatible for the loss calculation
+                if vt.shape[1] != ut.shape[1]:
+                    min_channels = min(vt.shape[1], ut.shape[1])
+                    vt = vt[:, :min_channels]
+                    ut = ut[:, :min_channels]
+                    print(f"Adjusted to common shape: vt {vt.shape}, ut {ut.shape}")
+            
             mse = (vt - ut) ** 2
             # apply mask
             print(f"MSE shape: {mse.shape}, Mask shape: {mask.shape}")
