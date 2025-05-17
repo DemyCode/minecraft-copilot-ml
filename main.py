@@ -84,7 +84,15 @@ if __name__ == "__main__":
     for param in model.parameters():
         model_size += param.data.nelement()
     print("Model params: %.2f M" % (model_size / 1024 / 1024))
-    ema_model = copy.deepcopy(model)
+    
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    
+    # Move model to device
+    model = model.to(device)
+    ema_model = copy.deepcopy(model)  # This will also be on the same device
+    
     optim = torch.optim.Adam(model.parameters(), lr=2e-4)
     sched = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=warmup_lr)
     EPOCHS = 10000
@@ -95,14 +103,16 @@ if __name__ == "__main__":
         for step_i, data in tqdm(enumerate(train_dataloader)):
             x = data["blocks"]
             mask = data["mask"]
-            x = x.to("cuda")
-            mask = mask.to("cuda")
+            # Use the device variable defined earlier
+            x = x.to(device)
+            mask = mask.to(device)
             x = x.float()
-            x0 = torch.randn_like(x)
+            x0 = torch.randn_like(x)  # This will be on the same device as x
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x)
-            t = t.to("cuda")
-            xt = xt.to("cuda")
-            ut = ut.to("cuda")
+            # Ensure all tensors are on the same device
+            t = t.to(device)
+            xt = xt.to(device)
+            ut = ut.to(device)
             vt = model(xt, t)
             mse = (vt - ut) ** 2
             # apply mask
