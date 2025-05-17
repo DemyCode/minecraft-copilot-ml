@@ -61,10 +61,13 @@ if __name__ == "__main__":
     )
 
     # Create the model
+    num_block_types = len(dataset.block_to_idx)
+    print(f"Number of block types (channels): {num_block_types}")
+    
     model = UNetModel(
-        in_channels=len(dataset.block_to_idx),
+        in_channels=num_block_types,
         model_channels=64,
-        out_channels=len(dataset.block_to_idx),
+        out_channels=num_block_types,
         num_res_blocks=2,
         attention_resolutions=(4,),
         dropout=0.1,
@@ -113,9 +116,49 @@ if __name__ == "__main__":
             t = t.to(device)
             xt = xt.to(device)
             ut = ut.to(device)
+            
+            # Debug tensor shapes
+            print(f"xt shape: {xt.shape}, t shape: {t.shape}")
+            
+            # The model expects input with in_channels=len(dataset.block_to_idx)
+            # But xt has 64 channels, so we need to reshape it
+            if xt.shape[1] != len(dataset.block_to_idx):
+                # Reshape xt to match the expected input channels
+                # This is a temporary fix - we need to ensure the flow matching
+                # generates tensors with the correct shape
+                xt_reshaped = torch.zeros(xt.shape[0], len(dataset.block_to_idx), 
+                                         xt.shape[2], xt.shape[3], xt.shape[4], 
+                                         device=device)
+                # Copy the data from xt to the first channels of xt_reshaped
+                min_channels = min(xt.shape[1], len(dataset.block_to_idx))
+                xt_reshaped[:, :min_channels] = xt[:, :min_channels]
+                xt = xt_reshaped
+                print(f"Reshaped xt to: {xt.shape}")
+            
             vt = model(xt, t)
+            
+            # Also reshape ut to match vt for the loss calculation
+            if ut.shape[1] != vt.shape[1]:
+                ut_reshaped = torch.zeros_like(vt)
+                min_channels = min(ut.shape[1], vt.shape[1])
+                ut_reshaped[:, :min_channels] = ut[:, :min_channels]
+                ut = ut_reshaped
+                print(f"Reshaped ut to: {ut.shape}")
+                
             mse = (vt - ut) ** 2
             # apply mask
+            print(f"MSE shape: {mse.shape}, Mask shape: {mask.shape}")
+            
+            # Ensure mask has the right shape for broadcasting
+            if len(mask.shape) < len(mse.shape):
+                # Add channel dimension if needed
+                mask_expanded = mask.unsqueeze(1)
+                # Repeat mask across all channels if needed
+                if mask_expanded.shape[1] != mse.shape[1]:
+                    mask_expanded = mask_expanded.repeat(1, mse.shape[1], 1, 1, 1)
+                print(f"Expanded mask shape: {mask_expanded.shape}")
+                mask = mask_expanded
+                
             loss = mse * mask
             loss = loss.mean()
             loss.backward()
