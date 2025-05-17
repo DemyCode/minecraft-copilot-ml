@@ -61,10 +61,13 @@ if __name__ == "__main__":
     )
 
     # Create the model
+    num_block_types = len(dataset.block_to_idx)
+    print(f"Number of block types (channels): {num_block_types}")
+
     model = UNetModel(
-        in_channels=len(dataset.block_to_idx),
+        in_channels=num_block_types,
         model_channels=64,
-        out_channels=len(dataset.block_to_idx),
+        out_channels=num_block_types,
         num_res_blocks=2,
         attention_resolutions=(4,),
         dropout=0.1,
@@ -116,6 +119,18 @@ if __name__ == "__main__":
             vt = model(t, xt)
             mse = (vt - ut) ** 2
             # apply mask
+            print(f"MSE shape: {mse.shape}, Mask shape: {mask.shape}")
+
+            # Ensure mask has the right shape for broadcasting
+            if len(mask.shape) < len(mse.shape):
+                # Add channel dimension if needed
+                mask_expanded = mask.unsqueeze(1)
+                # Repeat mask across all channels if needed
+                if mask_expanded.shape[1] != mse.shape[1]:
+                    mask_expanded = mask_expanded.repeat(1, mse.shape[1], 1, 1, 1)
+                print(f"Expanded mask shape: {mask_expanded.shape}")
+                mask = mask_expanded
+
             loss = mse * mask
             loss = loss.mean()
             loss.backward()
