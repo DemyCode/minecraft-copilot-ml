@@ -154,9 +154,17 @@ if __name__ == "__main__":
 
             vt = model(t, xt)
             mse = (vt - ut) ** 2
-            logger.debug(mse.shape)
-            logger.debug(mask.shape)
-            loss = mse * mask
+            print(f"MSE shape: {mse.shape}, Mask shape: {mask.shape}")
+            
+            # Reshape mask for proper broadcasting
+            # Mask shape: [batch_size, 16, 16, 16]
+            # MSE shape: [batch_size, channels, 16, 16, 16]
+            # We need to add a channel dimension to the mask
+            mask_expanded = mask.unsqueeze(1)  # Shape: [batch_size, 1, 16, 16, 16]
+            print(f"Expanded mask shape: {mask_expanded.shape}")
+            
+            # Now the broadcasting will work correctly
+            loss = mse * mask_expanded  # Broadcasting will apply mask to all channels
             loss = loss.mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # new
