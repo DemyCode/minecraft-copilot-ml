@@ -116,6 +116,26 @@ if __name__ == "__main__":
             t = t.to(device)
             xt = xt.to(device)
             ut = ut.to(device)
+            
+            # Debug tensor shapes
+            print(f"x shape: {x.shape}, x0 shape: {x0.shape}")
+            print(f"xt shape: {xt.shape}, t shape: {t.shape}, ut shape: {ut.shape}")
+            print(f"Model in_channels: {model.in_channels}, model_channels: {model.model_channels}")
+            
+            # The model expects input with in_channels=model.in_channels
+            # But xt might have different channels, so we need to reshape it
+            if xt.shape[1] != model.in_channels:
+                print(f"Reshaping xt from {xt.shape[1]} channels to {model.in_channels} channels")
+                # Reshape xt to match the expected input channels
+                xt_reshaped = torch.zeros(xt.shape[0], model.in_channels, 
+                                         xt.shape[2], xt.shape[3], xt.shape[4], 
+                                         device=device)
+                # Copy the data from xt to the first channels of xt_reshaped
+                min_channels = min(xt.shape[1], model.in_channels)
+                xt_reshaped[:, :min_channels] = xt[:, :min_channels]
+                xt = xt_reshaped
+                print(f"Reshaped xt to: {xt.shape}")
+                
             vt = model(t, xt)
             mse = (vt - ut) ** 2
             # apply mask
