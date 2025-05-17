@@ -5,100 +5,25 @@ from minecraft_dataset import MinecraftSchematicDataset
 from improved_diffusion.unet import UNetModel
 from improved_diffusion.train_util import TrainLoop
 import os
-import argparse
 from improved_diffusion import dist_util, logger
+import copy
+from tqdm import tqdm
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
-    parser.add_argument("--num_epochs", type=int, default=100)
-    parser.add_argument("--save_interval", type=int, default=5000)
-    parser.add_argument("--log_interval", type=int, default=100)
-    parser.add_argument("--resume_checkpoint", type=str, default="")
-    parser.add_argument("--use_fp16", action="store_true")
-    parser.add_argument("--diffusion_steps", type=int, default=1000)
-    parser.add_argument("--noise_schedule", type=str, default="linear")
-    parser.add_argument("--ema_rate", type=str, default="0.9999")
-    parser.add_argument("--microbatch", type=int, default=16)
-    parser.add_argument("--weight_decay", type=float, default=0.0)
-    parser.add_argument("--lr_anneal_steps", type=int, default=0)
-    return parser.parse_args()
 
-def train(
-    model,
-    diffusion,
-    train_dataloader,
-    batch_size,
-    learning_rate,
-    save_interval,
-    log_interval,
-    resume_checkpoint,
-    use_fp16,
-    ema_rate,
-    microbatch,
-    weight_decay,
-    lr_anneal_steps,
-):
-    """
-    Train the diffusion model.
-    """
-    logger.configure(dir="logs", format_strs=["stdout", "log", "csv"])
-    
-    # Create a data iterator that yields batches of blocks and masks
-    def data_iterator():
-        while True:
-            for batch in train_dataloader:
-                # Convert blocks to one-hot encoding
-                blocks = batch["blocks"]
-                mask = batch["mask"]
-                
-                # Create a batch of data for the diffusion model
-                # The model expects a batch of shape [batch_size, channels, height, width, depth]
-                # where channels is the number of block types (one-hot encoded)
-                batch_size = blocks.shape[0]
-                num_blocks = model.in_channels
-                
-                # Create one-hot encoding
-                one_hot = torch.zeros(
-                    (batch_size, num_blocks, 16, 16, 16),
-                    device=dist_util.dev()
-                )
-                
-                # Fill in the one-hot encoding
-                for b in range(batch_size):
-                    for y in range(16):
-                        for z in range(16):
-                            for x in range(16):
-                                block_idx = blocks[b, y, z, x].item()
-                                one_hot[b, block_idx, y, z, x] = 1.0
-                
-                # Create condition dictionary with mask
-                cond = {"mask": mask.to(dist_util.dev())}
-                
-                yield one_hot.to(dist_util.dev()), cond
-    
-    # Create the training loop
-    TrainLoop(
-        model=model,
-        diffusion=diffusion,
-        data=data_iterator(),
-        batch_size=batch_size,
-        microbatch=microbatch,
-        lr=learning_rate,
-        ema_rate=ema_rate,
-        log_interval=log_interval,
-        save_interval=save_interval,
-        resume_checkpoint=resume_checkpoint,
-        use_fp16=use_fp16,
-        weight_decay=weight_decay,
-        lr_anneal_steps=lr_anneal_steps,
-    ).run_loop()
+def ema(source, target, decay):
+    source_dict = source.state_dict()
+    target_dict = target.state_dict()
+    for key in source_dict.keys():
+        target_dict[key].data.copy_(
+            target_dict[key].data * decay + source_dict[key].data * (1 - decay)
+        )
+
+
+def warmup_lr(step):
+    return min(step, 5000) / 5000
+
 
 if __name__ == "__main__":
-    # Parse command line arguments
-    args = parse_args()
-    
     # Create cache directory if it doesn't exist
     os.makedirs("cache", exist_ok=True)
     os.makedirs("models", exist_ok=True)
@@ -122,14 +47,14 @@ if __name__ == "__main__":
     # Create DataLoaders
     train_dataloader = DataLoader(
         train_dataset,
-        batch_size=args.batch_size,
+        batch_size=64,
         shuffle=True,
         num_workers=4,
         pin_memory=False,
     )
     val_dataloader = DataLoader(
         val_dataset,
-        batch_size=args.batch_size,
+        batch_size=64,
         shuffle=False,
         num_workers=4,
         pin_memory=False,
@@ -150,36 +75,54 @@ if __name__ == "__main__":
         use_checkpoint=False,
         num_heads=4,
     )
-    
-    # Move model to device
-    model.to(dist_util.dev())
-    
-    # Create the diffusion process
-    diffusion = create_gaussian_diffusion(
-        steps=args.diffusion_steps,
-        noise_schedule=args.noise_schedule,
-        learn_sigma=False,
-        sigma_small=False,
-        use_kl=False,
-        predict_xstart=False,
-        rescale_timesteps=True,
-        rescale_learned_sigmas=False,
-        timestep_respacing="",
+    from torchcfm.conditional_flow_matching import (
+        ExactOptimalTransportConditionalFlowMatcher,
     )
-    
-    # Train the model
-    train(
-        model=model,
-        diffusion=diffusion,
-        train_dataloader=train_dataloader,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        save_interval=args.save_interval,
-        log_interval=args.log_interval,
-        resume_checkpoint=args.resume_checkpoint,
-        use_fp16=args.use_fp16,
-        ema_rate=args.ema_rate,
-        microbatch=args.microbatch,
-        weight_decay=args.weight_decay,
-        lr_anneal_steps=args.lr_anneal_steps,
-    )
+
+    # show model size
+    model_size = 0
+    for param in model.parameters():
+        model_size += param.data.nelement()
+    print("Model params: %.2f M" % (model_size / 1024 / 1024))
+    ema_model = copy.deepcopy(model)
+    optim = torch.optim.Adam(model.parameters(), lr=2e-4)
+    sched = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=warmup_lr)
+    EPOCHS = 10000
+    FM = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
+    savedir = "./output/unet/"
+    os.makedirs(savedir, exist_ok=True)
+    for num_epoch in tqdm(range(EPOCHS)):
+        for step_i, data in tqdm(enumerate(train_dataloader)):
+            x = data["blocks"]
+            mask = data["mask"]
+            x = x.to("cuda")
+            mask = mask.to("cuda")
+            x = x.float()
+            x0 = torch.randn_like(x)
+            t, xt, ut = FM.sample_location_and_conditional_flow(x0, x)
+            t = t.to("cuda")
+            xt = xt.to("cuda")
+            ut = ut.to("cuda")
+            vt = model(xt, t)
+            mse = (vt - ut) ** 2
+            # apply mask
+            loss = mse * mask
+            loss = loss.mean()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # new
+            optim.step()
+            sched.step()
+            ema(model, ema_model, 0.9999)  # new
+
+            # sample and Saving the weights
+            if step_i % 5 == 0:
+                torch.save(
+                    {
+                        "net_model": model.state_dict(),
+                        "ema_model": ema_model.state_dict(),
+                        "sched": sched.state_dict(),
+                        "optim": optim.state_dict(),
+                        "step": step_i,
+                    },
+                    savedir + f"unet_cifar10_weights_step_{step_i}.pt",
+                )
