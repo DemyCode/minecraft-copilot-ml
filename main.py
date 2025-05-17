@@ -102,8 +102,12 @@ if __name__ == "__main__":
     FM = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
     savedir = "./output/unet/"
     os.makedirs(savedir, exist_ok=True)
-    for num_epoch in tqdm(range(EPOCHS)):
-        for step_i, data in tqdm(enumerate(train_dataloader)):
+    for num_epoch in tqdm(range(EPOCHS), desc="Epochs"):
+        # Initialize epoch metrics
+        epoch_losses = []
+        epoch_accuracies = []
+        
+        for step_i, data in tqdm(enumerate(train_dataloader), desc=f"Epoch {num_epoch}", leave=False):
             # Get block data and mask
             blocks = data["blocks"]
             mask = data["mask"]
@@ -166,6 +170,21 @@ if __name__ == "__main__":
             # Now the broadcasting will work correctly
             loss = mse * mask_expanded  # Broadcasting will apply mask to all channels
             loss = loss.mean()
+            
+            # Calculate accuracy (simple equality comparison)
+            with torch.no_grad():
+                # Compare predicted flow direction with ground truth
+                # Consider prediction correct if they are equal
+                correct = (vt.round() == ut.round()).float() * mask_expanded
+                accuracy = correct.sum() / (mask_expanded.sum() + 1e-8)  # Avoid division by zero
+                
+                # Store metrics for epoch averaging
+                epoch_losses.append(loss.item())
+                epoch_accuracies.append(accuracy.item())
+                
+                # Update tqdm description with current metrics
+                tqdm.write(f"Step {step_i}: Loss = {loss.item():.6f}, Accuracy = {accuracy.item():.4f}")
+            
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # new
             optim.step()
@@ -184,3 +203,30 @@ if __name__ == "__main__":
                     },
                     savedir + f"unet_cifar10_weights_step_{step_i}.pt",
                 )
+        
+        # Calculate and display epoch summary
+        avg_epoch_loss = sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0
+        avg_epoch_accuracy = sum(epoch_accuracies) / len(epoch_accuracies) if epoch_accuracies else 0
+        
+        # Print epoch summary
+        print(f"\n{'='*50}")
+        print(f"Epoch {num_epoch} Summary:")
+        print(f"Average Loss: {avg_epoch_loss:.6f}")
+        print(f"Average Accuracy: {avg_epoch_accuracy:.4f}")
+        print(f"Learning Rate: {sched.get_last_lr()[0]:.6f}")
+        print(f"{'='*50}\n")
+        
+        # Save epoch checkpoint
+        if num_epoch % 10 == 0:
+            torch.save(
+                {
+                    "net_model": model.state_dict(),
+                    "ema_model": ema_model.state_dict(),
+                    "sched": sched.state_dict(),
+                    "optim": optim.state_dict(),
+                    "epoch": num_epoch,
+                    "avg_loss": avg_epoch_loss,
+                    "avg_accuracy": avg_epoch_accuracy,
+                },
+                savedir + f"unet_epoch_{num_epoch}_checkpoint.pt",
+            )
