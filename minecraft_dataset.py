@@ -59,6 +59,8 @@ class MinecraftSchematicDataset(Dataset):
         self.preload = preload
         self.min_dimension = min_dimension
         self.embedding_dim = embedding_dim
+        
+        # Set embedding cache file
         self.embedding_cache_file = embedding_cache_file or "cache/block_embeddings.pt"
 
         # Find all schematic files
@@ -158,8 +160,6 @@ class MinecraftSchematicDataset(Dataset):
         print(f"Applying PCA to reduce dimensions to {self.embedding_dim}...")
         pca = PCA(n_components=self.embedding_dim)
         reduced_embeddings = pca.fit_transform(embeddings)
-        
-        # Convert to PyTorch tensor
         embeddings_tensor = torch.tensor(reduced_embeddings, dtype=torch.float32)
         
         # Set padding token embedding to zeros
