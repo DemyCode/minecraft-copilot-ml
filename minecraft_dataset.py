@@ -2,6 +2,7 @@
 """
 PyTorch dataset for Minecraft schematic files.
 This dataset loads schematic files and provides 16×16×16 chunks with masks.
+Uses sentence transformers to create embeddings for block types.
 """
 
 import os
@@ -12,14 +13,18 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import pickle
 from collections import defaultdict
+from sentence_transformers import SentenceTransformer
+from sklearn.decomposition import PCA
+import torch.nn as nn
 
-from schematic_loader import load_schematic_to_numpy
+from schematic_loader import load_schematic_to_numpy, BLOCK_ID_TO_NAME
 
 
 class MinecraftSchematicDataset(Dataset):
     """
     PyTorch dataset for Minecraft schematic files.
     Provides 16×16×16 chunks with masks for areas where dimensions are smaller than 16.
+    Uses sentence transformers to create embeddings for block types.
     """
 
     def __init__(
@@ -29,8 +34,10 @@ class MinecraftSchematicDataset(Dataset):
         transform=None,
         preload=False,
         cache_file=None,
+        embedding_cache_file=None,
         max_files=None,
         min_dimension=16,
+        embedding_dim=32,
     ):
         """
         Initialize the dataset.
@@ -41,14 +48,18 @@ class MinecraftSchematicDataset(Dataset):
             transform (callable, optional): Optional transform to be applied on a sample
             preload (bool): Whether to preload all data into memory (default: False)
             cache_file (str, optional): Path to cache file for block mappings
+            embedding_cache_file (str, optional): Path to cache file for block embeddings
             max_files (int, optional): Maximum number of files to load
             min_dimension (int): Minimum dimension required for a schematic to be included
+            embedding_dim (int): Dimension for the block embeddings after PCA reduction
         """
         self.schematics_dir = schematics_dir
         self.chunk_size = chunk_size
         self.transform = transform
         self.preload = preload
         self.min_dimension = min_dimension
+        self.embedding_dim = embedding_dim
+        self.embedding_cache_file = embedding_cache_file or "cache/block_embeddings.pt"
 
         # Find all schematic files
         self.schematic_files = []
@@ -91,10 +102,77 @@ class MinecraftSchematicDataset(Dataset):
                         f,
                     )
 
+        # Create block embeddings using sentence transformers
+        self.block_embeddings = self._create_block_embeddings()
+        
         # Preload data if requested
         self.preloaded_data = None
         if self.preload:
             self._preload_data()
+            
+    def _create_block_embeddings(self):
+        """
+        Create embeddings for block types using sentence transformers.
+        Uses PCA to reduce dimensions to the specified embedding_dim.
+        
+        Returns:
+            torch.Tensor: Tensor of shape [num_blocks, embedding_dim] with embeddings for each block type
+        """
+        # Check if embeddings already exist in cache
+        if os.path.exists(self.embedding_cache_file):
+            print(f"Loading block embeddings from cache: {self.embedding_cache_file}")
+            return torch.load(self.embedding_cache_file)
+        
+        print("Creating block embeddings using sentence transformers...")
+        
+        # Create a mapping from block indices to block names
+        block_names = []
+        for idx in range(len(self.idx_to_block)):
+            block = self.idx_to_block.get(idx)
+            if isinstance(block, str):
+                # Special tokens
+                if block == "<pad>":
+                    block_names.append("padding")
+                elif block == "<unk>":
+                    block_names.append("unknown block")
+                else:
+                    block_names.append(block)
+            else:
+                # Numeric block ID, get name from BLOCK_ID_TO_NAME
+                block_name = BLOCK_ID_TO_NAME.get(block, f"unknown block {block}")
+                # Remove "minecraft:" prefix for better semantic meaning
+                block_name = block_name.replace("minecraft:", "")
+                # Replace underscores with spaces for better semantic meaning
+                block_name = block_name.replace("_", " ")
+                block_names.append(block_name)
+        
+        # Load the sentence transformer model
+        print("Loading sentence transformer model...")
+        model = SentenceTransformer("all-mpnet-base-v2")
+        
+        # Generate embeddings for all block names
+        print("Generating embeddings for block names...")
+        embeddings = model.encode(block_names)
+        
+        # Apply PCA to reduce dimensions
+        print(f"Applying PCA to reduce dimensions to {self.embedding_dim}...")
+        pca = PCA(n_components=self.embedding_dim)
+        reduced_embeddings = pca.fit_transform(embeddings)
+        
+        # Convert to PyTorch tensor
+        embeddings_tensor = torch.tensor(reduced_embeddings, dtype=torch.float32)
+        
+        # Set padding token embedding to zeros
+        if "<pad>" in self.block_to_idx:
+            pad_idx = self.block_to_idx["<pad>"]
+            embeddings_tensor[pad_idx] = torch.zeros(self.embedding_dim)
+        
+        # Save embeddings to cache
+        os.makedirs(os.path.dirname(self.embedding_cache_file), exist_ok=True)
+        torch.save(embeddings_tensor, self.embedding_cache_file)
+        
+        print(f"Created embeddings of shape: {embeddings_tensor.shape}")
+        return embeddings_tensor
 
     def _scan_files(self):
         """Scan all schematic files to build block mappings and collect file info."""
@@ -229,6 +307,7 @@ class MinecraftSchematicDataset(Dataset):
         Returns:
             dict: A dictionary containing:
                 - 'blocks': Tensor of shape (chunk_size, chunk_size, chunk_size) with block indices
+                - 'block_embeddings': Tensor of shape (chunk_size, chunk_size, chunk_size, embedding_dim) with embeddings
                 - 'mask': Tensor of shape (chunk_size, chunk_size, chunk_size) with 1 for valid positions, 0 for padding
                 - 'file_path': Path to the source schematic file
         """
@@ -249,13 +328,28 @@ class MinecraftSchematicDataset(Dataset):
         # Convert to tensors
         chunk_tensor = torch.tensor(chunk, dtype=torch.long)
         mask_tensor = torch.tensor(mask, dtype=torch.float)
+        
+        # Create embeddings tensor for the chunk
+        # Shape: [chunk_size, chunk_size, chunk_size, embedding_dim]
+        chunk_embeddings = torch.zeros(
+            (self.chunk_size, self.chunk_size, self.chunk_size, self.embedding_dim),
+            dtype=torch.float32
+        )
+        
+        # Fill in embeddings for each position
+        for y in range(self.chunk_size):
+            for z in range(self.chunk_size):
+                for x in range(self.chunk_size):
+                    block_idx = chunk_tensor[y, z, x].item()
+                    chunk_embeddings[y, z, x] = self.block_embeddings[block_idx]
 
         # Apply transform if specified
         if self.transform:
             chunk_tensor = self.transform(chunk_tensor)
 
         return {
-            "blocks": chunk_tensor,
+            "blocks": chunk_tensor,  # Original block indices
+            "block_embeddings": chunk_embeddings,  # Block embeddings
             "mask": mask_tensor,
             "file_path": self.file_info[idx]["path"],
         }

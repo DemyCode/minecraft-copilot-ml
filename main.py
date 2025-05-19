@@ -29,12 +29,14 @@ if __name__ == "__main__":
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
 
-    # Create the dataset
+    # Create the dataset with embeddings
     dataset = MinecraftSchematicDataset(
         schematics_dir="minecraft-schematics-raw",
         chunk_size=16,
         cache_file="cache/block_mappings.pkl",
+        embedding_cache_file="cache/block_embeddings.pt",
         max_files=None,  # Use all files
+        embedding_dim=32,  # Dimension for embeddings after PCA reduction
     )
 
     # Split into train and validation sets
@@ -60,14 +62,16 @@ if __name__ == "__main__":
         pin_memory=False,
     )
 
-    # Create the model
+    # Create the model using embeddings
     num_block_types = len(dataset.block_to_idx)
-    print(f"Number of block types (channels): {num_block_types}")
+    embedding_dim = dataset.embedding_dim
+    print(f"Number of block types: {num_block_types}")
+    print(f"Embedding dimension: {embedding_dim}")
 
     model = UNetModel(
-        in_channels=num_block_types,
+        in_channels=embedding_dim,  # Using embedding dimension instead of one-hot
         model_channels=64,
-        out_channels=num_block_types,
+        out_channels=embedding_dim,  # Output will be in embedding space
         num_res_blocks=2,
         attention_resolutions=(4,),
         dropout=0.1,
@@ -110,34 +114,21 @@ if __name__ == "__main__":
         for step_i, data in tqdm(
             enumerate(train_dataloader), desc=f"Epoch {num_epoch}", leave=False
         ):
-            # Get block data and mask
+            # Get block data, embeddings, and mask
             blocks = data["blocks"]
+            block_embeddings = data["block_embeddings"]
             mask = data["mask"]
 
             # Move to device
             blocks = blocks.to(device)
+            block_embeddings = block_embeddings.to(device)
             mask = mask.to(device)
 
-            # One-hot encode the blocks
-            # blocks is expected to contain integer indices
-            num_classes = len(dataset.block_to_idx)
-
-            # Ensure block indices are within valid range
-            blocks_clamped = torch.clamp(blocks.long(), 0, num_classes - 1)
-
-            # Create one-hot encoded tensor using PyTorch's built-in function
-            # First reshape blocks to be a 1D tensor of indices
+            # Prepare embeddings for the model
+            # block_embeddings shape: [batch_size, chunk_size, chunk_size, chunk_size, embedding_dim]
+            # We need to permute to get channels as the second dimension [batch, channels, depth, height, width]
             batch_size, depth, height, width = blocks.shape
-            blocks_flat = blocks_clamped.reshape(-1)
-
-            # Create one-hot encoding
-            one_hot_flat = torch.zeros(blocks_flat.size(0), num_classes, device=device)
-            one_hot_flat.scatter_(1, blocks_flat.unsqueeze(1), 1.0)
-
-            # Reshape back to original dimensions with channels
-            x = one_hot_flat.reshape(batch_size, depth, height, width, num_classes)
-            # Permute to get channels as the second dimension [batch, channels, depth, height, width]
-            x = x.permute(0, 4, 1, 2, 3)
+            x = block_embeddings.permute(0, 4, 1, 2, 3)
 
             x0 = torch.randn_like(x)  # This will be on the same device as x
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x)
@@ -161,13 +152,20 @@ if __name__ == "__main__":
             loss = mse * mask_expanded  # Broadcasting will apply mask to all channels
             loss = loss.mean()
 
-            # Calculate accuracy (simple equality comparison)
+            # Calculate accuracy (using cosine similarity for embeddings)
             with torch.no_grad():
-                # Compare predicted flow direction with ground truth
-                # Consider prediction correct if they are equal
-                argmax_vt = vt.argmax(dim=1)
-                argmax_ut = ut.argmax(dim=1)
-                correct = (vt == ut.round()).float() * mask_expanded
+                # For embeddings, we use cosine similarity instead of exact matching
+                # Normalize the vectors for cosine similarity
+                vt_norm = torch.nn.functional.normalize(vt, p=2, dim=1)
+                ut_norm = torch.nn.functional.normalize(ut, p=2, dim=1)
+                
+                # Calculate cosine similarity (dot product of normalized vectors)
+                # This will be in range [-1, 1], where 1 means perfect match
+                similarity = (vt_norm * ut_norm).sum(dim=1, keepdim=True)
+                
+                # Consider prediction correct if similarity is above threshold (e.g., 0.8)
+                similarity_threshold = 0.8
+                correct = (similarity > similarity_threshold).float() * mask_expanded
                 accuracy = correct.sum() / (
                     mask_expanded.sum()
                 )  # Avoid division by zero
