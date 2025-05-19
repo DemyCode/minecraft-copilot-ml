@@ -106,8 +106,10 @@ if __name__ == "__main__":
         # Initialize epoch metrics
         epoch_losses = []
         epoch_accuracies = []
-        
-        for step_i, data in tqdm(enumerate(train_dataloader), desc=f"Epoch {num_epoch}", leave=False):
+
+        for step_i, data in tqdm(
+            enumerate(train_dataloader), desc=f"Epoch {num_epoch}", leave=False
+        ):
             # Get block data and mask
             blocks = data["blocks"]
             mask = data["mask"]
@@ -119,10 +121,6 @@ if __name__ == "__main__":
             # One-hot encode the blocks
             # blocks is expected to contain integer indices
             num_classes = len(dataset.block_to_idx)
-            print(f"One-hot encoding blocks with {num_classes} classes")
-            print(
-                f"Original blocks shape: {blocks.shape}, min: {blocks.min()}, max: {blocks.max()}"
-            )
 
             # Ensure block indices are within valid range
             blocks_clamped = torch.clamp(blocks.long(), 0, num_classes - 1)
@@ -141,7 +139,6 @@ if __name__ == "__main__":
             # Permute to get channels as the second dimension [batch, channels, depth, height, width]
             x = x.permute(0, 4, 1, 2, 3)
 
-            print(f"One-hot encoded x shape: {x.shape}")
             x0 = torch.randn_like(x)  # This will be on the same device as x
             t, xt, ut = FM.sample_location_and_conditional_flow(x0, x)
             # Ensure all tensors are on the same device
@@ -150,41 +147,40 @@ if __name__ == "__main__":
             ut = ut.to(device)
 
             # Debug tensor shapes
-            print(f"x shape: {x.shape}, x0 shape: {x0.shape}")
-            print(f"xt shape: {xt.shape}, t shape: {t.shape}, ut shape: {ut.shape}")
-            print(
-                f"Model in_channels: {model.in_channels}, model_channels: {model.model_channels}"
-            )
 
             vt = model(t, xt)
             mse = (vt - ut) ** 2
-            print(f"MSE shape: {mse.shape}, Mask shape: {mask.shape}")
-            
+
             # Reshape mask for proper broadcasting
             # Mask shape: [batch_size, 16, 16, 16]
             # MSE shape: [batch_size, channels, 16, 16, 16]
             # We need to add a channel dimension to the mask
             mask_expanded = mask.unsqueeze(1)  # Shape: [batch_size, 1, 16, 16, 16]
-            print(f"Expanded mask shape: {mask_expanded.shape}")
-            
+
             # Now the broadcasting will work correctly
             loss = mse * mask_expanded  # Broadcasting will apply mask to all channels
             loss = loss.mean()
-            
+
             # Calculate accuracy (simple equality comparison)
             with torch.no_grad():
                 # Compare predicted flow direction with ground truth
                 # Consider prediction correct if they are equal
-                correct = (vt.round() == ut.round()).float() * mask_expanded
-                accuracy = correct.sum() / (mask_expanded.sum() + 1e-8)  # Avoid division by zero
-                
+                argmax_vt = vt.argmax(dim=1)
+                argmax_ut = ut.argmax(dim=1)
+                correct = (vt == ut.round()).float() * mask_expanded
+                accuracy = correct.sum() / (
+                    mask_expanded.sum()
+                )  # Avoid division by zero
+
                 # Store metrics for epoch averaging
                 epoch_losses.append(loss.item())
                 epoch_accuracies.append(accuracy.item())
-                
+
                 # Update tqdm description with current metrics
-                tqdm.write(f"Step {step_i}: Loss = {loss.item():.6f}, Accuracy = {accuracy.item():.4f}")
-            
+                tqdm.write(
+                    f"Step {step_i}: Loss = {loss.item():.6f}, Accuracy = {accuracy.item():.4f}"
+                )
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # new
             optim.step()
@@ -203,19 +199,21 @@ if __name__ == "__main__":
                     },
                     savedir + f"unet_cifar10_weights_step_{step_i}.pt",
                 )
-        
+
         # Calculate and display epoch summary
         avg_epoch_loss = sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0
-        avg_epoch_accuracy = sum(epoch_accuracies) / len(epoch_accuracies) if epoch_accuracies else 0
-        
+        avg_epoch_accuracy = (
+            sum(epoch_accuracies) / len(epoch_accuracies) if epoch_accuracies else 0
+        )
+
         # Print epoch summary
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"Epoch {num_epoch} Summary:")
         print(f"Average Loss: {avg_epoch_loss:.6f}")
         print(f"Average Accuracy: {avg_epoch_accuracy:.4f}")
         print(f"Learning Rate: {sched.get_last_lr()[0]:.6f}")
-        print(f"{'='*50}\n")
-        
+        print(f"{'=' * 50}\n")
+
         # Save epoch checkpoint
         if num_epoch % 10 == 0:
             torch.save(
