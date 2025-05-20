@@ -98,6 +98,12 @@ def generate_samples(
         Dimension of block embeddings
     device: str
         Device to use for generation
+    input_data: torch.Tensor, optional
+        Optional input data to partially destroy and reconstruct.
+        Shape: [batch_size, embedding_dim, 16, 16, 16]
+    destruction_percentage: float, optional
+        Percentage of blocks to destroy (replace with noise) in the input_data.
+        Value between 0 and 1. Default is 0 (no destruction).
     """
     model.eval()
 
@@ -175,7 +181,6 @@ def generate_samples_from_structure(
 
     model.train()
     return traj
-
 
 def map_embeddings_to_blocks(embeddings, block_embeddings, idx_to_block):
     """Map continuous embedding values to discrete Minecraft blocks.
@@ -376,6 +381,7 @@ def main():
         model.load_state_dict(checkpoint)
 
     model = model.to(device)
+<<<<<<< HEAD
 
     # Generate samples
     print(f"Generating {args.num_samples} samples...")
@@ -428,7 +434,6 @@ def main():
         save_as_schematic(block_names, os.path.join(args.output_dir, "schematic"))
 
     print(f"Generation complete. Results saved to {args.output_dir}")
-
 
 if __name__ == "__main__":
     main()
