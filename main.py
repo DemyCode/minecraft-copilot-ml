@@ -12,6 +12,7 @@ from minecraft_dataset import MinecraftSchematicDataset
 from torchcfm.conditional_flow_matching import (
     ExactOptimalTransportConditionalFlowMatcher,
 )
+from datetime import datetime
 
 
 def ema(source, target, decay):
@@ -125,8 +126,12 @@ if __name__ == "__main__":
 
     # Set up training parameters
     num_epochs = 10000
-    savedir = "./output/unet/"
+    
+    # Create date-specific folder for saving models
+    current_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    savedir = f"./output/unet/{current_date}/"
     os.makedirs(savedir, exist_ok=True)
+    print(f"Models will be saved to: {savedir}")
 
     # Enable automatic mixed precision for faster training if available
     scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
