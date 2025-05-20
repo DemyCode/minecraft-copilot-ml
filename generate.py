@@ -182,6 +182,7 @@ def generate_samples_from_structure(
     model.train()
     return traj
 
+
 def map_embeddings_to_blocks(embeddings, block_embeddings, idx_to_block):
     """Map continuous embedding values to discrete Minecraft blocks.
 
@@ -381,7 +382,6 @@ def main():
         model.load_state_dict(checkpoint)
 
     model = model.to(device)
-<<<<<<< HEAD
 
     # Generate samples
     print(f"Generating {args.num_samples} samples...")
@@ -435,6 +435,6 @@ def main():
 
     print(f"Generation complete. Results saved to {args.output_dir}")
 
+
 if __name__ == "__main__":
     main()
-
