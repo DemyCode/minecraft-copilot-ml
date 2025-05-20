@@ -278,7 +278,7 @@ if __name__ == "__main__":
         print(f"{'=' * 50}\n")
 
         # Save epoch checkpoint and evaluate on validation set
-        if num_epoch % 10 == 0:
+        if num_epoch % 5 == 0:
             # Save checkpoint
             torch.save(
                 {

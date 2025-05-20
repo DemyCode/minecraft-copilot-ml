@@ -24,20 +24,64 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate samples from a trained flow matching model")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to the model checkpoint")
-    parser.add_argument("--cache_file", type=str, default="cache/block_mappings.pkl", help="Path to the block mappings cache")
-    parser.add_argument("--embedding_cache", type=str, default="cache/block_embeddings.pt", help="Path to the block embeddings cache")
-    parser.add_argument("--output_dir", type=str, default="generated_samples", help="Directory to save generated samples")
-    parser.add_argument("--num_samples", type=int, default=8, help="Number of samples to generate")
-    parser.add_argument("--chunk_size", type=int, default=16, help="Size of the generated chunks")
-    parser.add_argument("--embedding_dim", type=int, default=32, help="Dimension of block embeddings")
-    parser.add_argument("--save_npy", action="store_true", help="Save raw numpy arrays of block indices")
-    parser.add_argument("--save_schematic", action="store_true", help="Save as Minecraft schematic files")
+    parser = argparse.ArgumentParser(
+        description="Generate samples from a trained flow matching model"
+    )
+    parser.add_argument(
+        "--model_path", type=str, required=True, help="Path to the model checkpoint"
+    )
+    parser.add_argument(
+        "--cache_file",
+        type=str,
+        default="cache/block_mappings.pkl",
+        help="Path to the block mappings cache",
+    )
+    parser.add_argument(
+        "--embedding_cache",
+        type=str,
+        default="cache/block_embeddings.pt",
+        help="Path to the block embeddings cache",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="generated_samples",
+        help="Directory to save generated samples",
+    )
+    parser.add_argument(
+        "--num_samples", type=int, default=8, help="Number of samples to generate"
+    )
+    parser.add_argument(
+        "--chunk_size", type=int, default=16, help="Size of the generated chunks"
+    )
+    parser.add_argument(
+        "--embedding_dim", type=int, default=32, help="Dimension of block embeddings"
+    )
+    parser.add_argument(
+        "--save_npy", action="store_true", help="Save raw numpy arrays of block indices"
+    )
+    parser.add_argument(
+        "--save_schematic",
+        action="store_true",
+        help="Save as Minecraft schematic files",
+    )
+    parser.add_argument(
+        "--original_structure",
+        action="store_true",
+        help="Path to the original structure for conditional generation",
+    )
+    parser.add_argument(
+        "--t",
+        type=float,
+        default=None,
+        help="Time step for conditional generation (if using original structure)",
+    )
     return parser.parse_args()
 
 
-def generate_samples(model, savedir, step, num_samples=64, embedding_dim=32, device="cuda"):
+def generate_samples(
+    model, savedir, step, num_samples=64, embedding_dim=32, device="cuda"
+):
     """Generate samples from the model and save them as images.
 
     Parameters
@@ -56,39 +100,86 @@ def generate_samples(model, savedir, step, num_samples=64, embedding_dim=32, dev
         Device to use for generation
     """
     model.eval()
-    
+
     # Create a copy of the model for inference
     model_ = copy.deepcopy(model)
-    
+
     # Create Neural ODE for trajectory generation
     node_ = NeuralODE(model_, solver="euler", sensitivity="adjoint")
-    
+
     with torch.no_grad():
         # Generate random noise as starting point with correct dimensions
         # Shape: [num_samples, embedding_dim, 16, 16, 16]
         noise = torch.randn(num_samples, embedding_dim, 16, 16, 16, device=device)
-        
+
         # Generate trajectory from noise to samples
         traj = node_.trajectory(
             noise,
             t_span=torch.linspace(0, 1, 100, device=device),
         )
-        
+
         # Get the final state of the trajectory
         # Shape: [num_samples, embedding_dim, 16, 16, 16]
         traj = traj[-1, :]
-    
+
     # No need to save as image since these are 3D embeddings, not 2D images
     # But we'll keep a record of the generation
     print(f"Generated {num_samples} samples with shape {traj.shape}")
-    
+
+    model.train()
+    return traj
+
+
+def generate_samples_from_structure(
+    model,
+    savedir,
+    step,
+    t,
+    minecraft_construction,
+    FM,
+    num_samples=64,
+    embedding_dim=32,
+    device="cuda",
+):
+    model.eval()
+
+    # Create a copy of the model for inference
+    model_ = copy.deepcopy(model)
+
+    # Create Neural ODE for trajectory generation
+    node_ = NeuralODE(model_, solver="euler", sensitivity="adjoint")
+
+    with torch.no_grad():
+        # Generate random noise as starting point with correct dimensions
+        # Shape: [num_samples, embedding_dim, 16, 16, 16]
+        block_embeddings = minecraft_construction["block_embeddings"].to(device)
+        block_embeddings = block_embeddings.unsqueeze(0)
+        x = block_embeddings.permute(0, 4, 1, 2, 3)
+        x0 = torch.randn_like(x)
+        t = torch.ones_like(x[:, 0, 0, 0, 0]) * t
+        t, xt, _ = FM.sample_location_and_conditional_flow(x0, x, t)
+
+        # Generate trajectory from noise to samples
+        traj = node_.trajectory(
+            xt,
+            t_span=torch.linspace(0, 1, 100, device=device),
+        )
+
+        # Get the final state of the trajectory
+        # Shape: [num_samples, embedding_dim, 16, 16, 16]
+        traj = traj[-1, :]
+
+    # No need to save as image since these are 3D embeddings, not 2D images
+    # But we'll keep a record of the generation
+    print(f"Generated {num_samples} samples with shape {traj.shape}")
+
     model.train()
     return traj
 
 
 def map_embeddings_to_blocks(embeddings, block_embeddings, idx_to_block):
     """Map continuous embedding values to discrete Minecraft blocks.
-    
+
     Parameters
     ----------
     embeddings: torch.Tensor
@@ -97,7 +188,7 @@ def map_embeddings_to_blocks(embeddings, block_embeddings, idx_to_block):
         Tensor of shape [num_blocks, embedding_dim] with embeddings for each block type
     idx_to_block: dict
         Mapping from block indices to block names/IDs
-    
+
     Returns
     -------
     blocks: numpy.ndarray
@@ -108,29 +199,33 @@ def map_embeddings_to_blocks(embeddings, block_embeddings, idx_to_block):
     # Reshape embeddings to [batch_size * depth * height * width, embedding_dim]
     batch_size, embedding_dim, depth, height, width = embeddings.shape
     embeddings_reshaped = embeddings.permute(0, 2, 3, 4, 1).reshape(-1, embedding_dim)
-    
+
     # Compute cosine similarity between generated embeddings and block embeddings
     block_embeddings_np = block_embeddings.cpu().numpy()
     embeddings_np = embeddings_reshaped.cpu().numpy()
-    
+
     # Handle NaN values that might occur in the embeddings
     embeddings_np = np.nan_to_num(embeddings_np)
-    
+
     # Normalize embeddings for cosine similarity
     # Add small epsilon to avoid division by zero
     epsilon = 1e-8
-    block_embeddings_norm = block_embeddings_np / (np.linalg.norm(block_embeddings_np, axis=1, keepdims=True) + epsilon)
-    embeddings_norm = embeddings_np / (np.linalg.norm(embeddings_np, axis=1, keepdims=True) + epsilon)
-    
+    block_embeddings_norm = block_embeddings_np / (
+        np.linalg.norm(block_embeddings_np, axis=1, keepdims=True) + epsilon
+    )
+    embeddings_norm = embeddings_np / (
+        np.linalg.norm(embeddings_np, axis=1, keepdims=True) + epsilon
+    )
+
     # Compute similarity
     similarities = cosine_similarity(embeddings_norm, block_embeddings_norm)
-    
+
     # Get the most similar block for each position
     block_indices = np.argmax(similarities, axis=1)
-    
+
     # Reshape back to [batch_size, depth, height, width]
     block_indices = block_indices.reshape(batch_size, depth, height, width)
-    
+
     # Map indices to block names
     block_names = np.zeros_like(block_indices, dtype=object)
     for i in range(batch_size):
@@ -151,13 +246,13 @@ def map_embeddings_to_blocks(embeddings, block_embeddings, idx_to_block):
                         # Numeric block ID, get name from BLOCK_ID_TO_NAME
                         block_name = BLOCK_ID_TO_NAME.get(block, "minecraft:stone")
                         block_names[i, d, h, w] = block_name
-    
+
     return block_indices, block_names
 
 
 def save_as_npy(block_indices, output_dir, prefix="sample"):
     """Save block indices as numpy arrays.
-    
+
     Parameters
     ----------
     block_indices: numpy.ndarray
@@ -168,7 +263,7 @@ def save_as_npy(block_indices, output_dir, prefix="sample"):
         Prefix for the saved files
     """
     os.makedirs(output_dir, exist_ok=True)
-    
+
     for i in range(block_indices.shape[0]):
         output_path = os.path.join(output_dir, f"{prefix}_{i:04d}.npy")
         np.save(output_path, block_indices[i])
@@ -177,7 +272,7 @@ def save_as_npy(block_indices, output_dir, prefix="sample"):
 
 def save_as_schematic(block_names, output_dir, prefix="sample"):
     """Save block names as Minecraft schematic files.
-    
+
     Parameters
     ----------
     block_names: numpy.ndarray
@@ -189,17 +284,17 @@ def save_as_schematic(block_names, output_dir, prefix="sample"):
     """
     try:
         from nbtlib import File, Compound, List, ByteArray, IntArray, Int, String
-        
+
         os.makedirs(output_dir, exist_ok=True)
-        
+
         for i in range(block_names.shape[0]):
             # Create a new schematic file
             height, length, width = block_names[i].shape
-            
+
             # Create a palette mapping block names to indices
             palette = {}
             block_data = []
-            
+
             # Fill the palette and block data
             for y in range(height):
                 for z in range(length):
@@ -208,7 +303,7 @@ def save_as_schematic(block_names, output_dir, prefix="sample"):
                         if block_name not in palette:
                             palette[block_name] = len(palette)
                         block_data.append(palette[block_name])
-            
+
             # Create the NBT structure
             schematic = {
                 "Version": Int(2),
@@ -219,7 +314,7 @@ def save_as_schematic(block_names, output_dir, prefix="sample"):
                 "Palette": Compound({String(k): Int(v) for k, v in palette.items()}),
                 "BlockData": IntArray(block_data),
             }
-            
+
             # Save the schematic file
             output_path = os.path.join(output_dir, f"{prefix}_{i:04d}.schem")
             File({"Schematic": Compound(schematic)}).save(output_path)
@@ -231,25 +326,25 @@ def save_as_schematic(block_names, output_dir, prefix="sample"):
 
 def main():
     args = parse_args()
-    
+
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    
+
     # Load block mappings
     print(f"Loading block mappings from {args.cache_file}")
     with open(args.cache_file, "rb") as f:
         cache_data = pickle.load(f)
         block_to_idx = cache_data["block_to_idx"]
         idx_to_block = cache_data["idx_to_block"]
-    
+
     # Load block embeddings
     print(f"Loading block embeddings from {args.embedding_cache}")
     block_embeddings = torch.load(args.embedding_cache)
-    
+
     # Create model
     print("Creating model...")
     model = UNetModel(
@@ -266,11 +361,11 @@ def main():
         use_checkpoint=False,
         num_heads=4,
     )
-    
+
     # Load model checkpoint
     print(f"Loading model from {args.model_path}")
     checkpoint = torch.load(args.model_path, map_location=device)
-    
+
     # Check if the checkpoint contains 'net_model' or 'ema_model' keys
     if "net_model" in checkpoint:
         model.load_state_dict(checkpoint["net_model"])
@@ -279,43 +374,62 @@ def main():
     else:
         # Try loading directly
         model.load_state_dict(checkpoint)
-    
+
     model = model.to(device)
-    
+
     # Generate samples
     print(f"Generating {args.num_samples} samples...")
-    
-    # Set up flow matcher
-    FM = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
-    
-    # Generate samples using Neural ODE
-    embeddings = generate_samples(
-        model, 
-        args.output_dir, 
-        step=0, 
-        num_samples=args.num_samples, 
-        embedding_dim=args.embedding_dim,
-        device=device
-    )
-    
+    if args.original_structure and args.t is not None:
+        dataset = MinecraftSchematicDataset(
+            schematics_dir="minecraft-schematics-raw",
+            chunk_size=16,
+            cache_file="cache/block_mappings.pkl",
+            embedding_cache_file="cache/block_embeddings.pt",
+            max_files=None,  # Use all files
+            embedding_dim=args.embedding_dim,  # Dimension for embeddings after PCA reduction
+        )
+        randint = 200
+        minecraft_construction = dataset[randint]
+        FM = ExactOptimalTransportConditionalFlowMatcher(sigma=0.0)
+        embeddings = generate_samples_from_structure(
+            model,
+            savedir=args.output_dir,
+            step=0,
+            num_samples=args.num_samples,
+            embedding_dim=args.embedding_dim,
+            device=device,
+            t=args.t,
+            FM=FM,
+            minecraft_construction=minecraft_construction,
+        )
+    else:
+        # Generate samples using Neural ODE
+        embeddings = generate_samples(
+            model,
+            args.output_dir,
+            step=0,
+            num_samples=args.num_samples,
+            embedding_dim=args.embedding_dim,
+            device=device,
+        )
+
     # Map embeddings back to Minecraft blocks
     print("Mapping embeddings to Minecraft blocks...")
     block_indices, block_names = map_embeddings_to_blocks(
-        embeddings, 
-        block_embeddings, 
-        idx_to_block
+        embeddings, block_embeddings, idx_to_block
     )
-    
+
     # Save as numpy arrays if requested
     if args.save_npy:
         save_as_npy(block_indices, os.path.join(args.output_dir, "npy"))
-    
+
     # Save as schematic files if requested
     if args.save_schematic:
         save_as_schematic(block_names, os.path.join(args.output_dir, "schematic"))
-    
+
     print(f"Generation complete. Results saved to {args.output_dir}")
 
 
 if __name__ == "__main__":
     main()
+
