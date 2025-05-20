@@ -211,7 +211,7 @@ if __name__ == "__main__":
 
             # Update tqdm description with current metrics (less frequently to reduce overhead)
             tqdm.write(
-                f"Step {step_i}: Loss = {loss.item():.6f}, Accuracy = {accuracy.item():.4f}
+                f"Step {step_i}: Loss = {loss.item():.6f}, Accuracy = {accuracy.item():.4f}, Learning Rate = {sched.get_last_lr()[0]:.6f}"
             )
 
             # Zero gradients before backward pass
