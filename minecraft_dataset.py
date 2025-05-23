@@ -59,7 +59,7 @@ class MinecraftSchematicDataset(Dataset):
         self.preload = preload
         self.min_dimension = min_dimension
         self.embedding_dim = embedding_dim
-        
+
         # Set embedding cache file
         self.embedding_cache_file = embedding_cache_file or "cache/block_embeddings.pt"
 
@@ -67,7 +67,7 @@ class MinecraftSchematicDataset(Dataset):
         self.schematic_files = []
         for root, _, files in os.walk(schematics_dir):
             for file in files:
-                if file.endswith(".schematic"):
+                if file.endswith(".schematic") or file.endswith(".schem"):
                     self.schematic_files.append(os.path.join(root, file))
 
         # Limit the number of files if specified
@@ -106,17 +106,17 @@ class MinecraftSchematicDataset(Dataset):
 
         # Create block embeddings using sentence transformers
         self.block_embeddings = self._create_block_embeddings()
-        
+
         # Preload data if requested
         self.preloaded_data = None
         if self.preload:
             self._preload_data()
-            
+
     def _create_block_embeddings(self):
         """
         Create embeddings for block types using sentence transformers.
         Uses PCA to reduce dimensions to the specified embedding_dim.
-        
+
         Returns:
             torch.Tensor: Tensor of shape [num_blocks, embedding_dim] with embeddings for each block type
         """
@@ -124,9 +124,9 @@ class MinecraftSchematicDataset(Dataset):
         if os.path.exists(self.embedding_cache_file):
             print(f"Loading block embeddings from cache: {self.embedding_cache_file}")
             return torch.load(self.embedding_cache_file)
-        
+
         print("Creating block embeddings using sentence transformers...")
-        
+
         # Create a mapping from block indices to block names
         block_names = []
         for idx in range(len(self.idx_to_block)):
@@ -147,30 +147,30 @@ class MinecraftSchematicDataset(Dataset):
                 # Replace underscores with spaces for better semantic meaning
                 block_name = block_name.replace("_", " ")
                 block_names.append(block_name)
-        
+
         # Load the sentence transformer model
         print("Loading sentence transformer model...")
         model = SentenceTransformer("all-mpnet-base-v2")
-        
+
         # Generate embeddings for all block names
         print("Generating embeddings for block names...")
         embeddings = model.encode(block_names)
-        
+
         # Apply PCA to reduce dimensions
         print(f"Applying PCA to reduce dimensions to {self.embedding_dim}...")
         pca = PCA(n_components=self.embedding_dim)
         reduced_embeddings = pca.fit_transform(embeddings)
         embeddings_tensor = torch.tensor(reduced_embeddings, dtype=torch.float32)
-        
+
         # Set padding token embedding to zeros
         if "<pad>" in self.block_to_idx:
             pad_idx = self.block_to_idx["<pad>"]
             embeddings_tensor[pad_idx] = torch.zeros(self.embedding_dim)
-        
+
         # Save embeddings to cache
         os.makedirs(os.path.dirname(self.embedding_cache_file), exist_ok=True)
         torch.save(embeddings_tensor, self.embedding_cache_file)
-        
+
         print(f"Created embeddings of shape: {embeddings_tensor.shape}")
         return embeddings_tensor
 
@@ -328,14 +328,14 @@ class MinecraftSchematicDataset(Dataset):
         # Convert to tensors
         chunk_tensor = torch.tensor(chunk, dtype=torch.long)
         mask_tensor = torch.tensor(mask, dtype=torch.float)
-        
+
         # Create embeddings tensor for the chunk
         # Shape: [chunk_size, chunk_size, chunk_size, embedding_dim]
         chunk_embeddings = torch.zeros(
             (self.chunk_size, self.chunk_size, self.chunk_size, self.embedding_dim),
-            dtype=torch.float32
+            dtype=torch.float32,
         )
-        
+
         # Fill in embeddings for each position
         for y in range(self.chunk_size):
             for z in range(self.chunk_size):
@@ -387,4 +387,3 @@ if __name__ == "__main__":
     # Calculate the percentage of valid (non-padded) positions in the batch
     valid_percentage = batch["mask"].float().mean().item() * 100
     print(f"\nPercentage of valid positions in batch: {valid_percentage:.2f}%")
-
