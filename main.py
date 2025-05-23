@@ -4,10 +4,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from improved_diffusion.script_util import create_gaussian_diffusion
 from improved_diffusion.unet import UNetModel
-from improved_diffusion.train_util import TrainLoop
-from improved_diffusion import dist_util, logger
 from minecraft_dataset import MinecraftSchematicDataset
 from torchcfm.conditional_flow_matching import (
     ExactOptimalTransportConditionalFlowMatcher,
@@ -90,7 +87,7 @@ if __name__ == "__main__":
 
     model = UNetModel(
         in_channels=embedding_dim,  # Using embedding dimension instead of one-hot
-        model_channels=64,
+        model_channels=128,
         out_channels=embedding_dim,  # Output will be in embedding space
         num_res_blocks=2,
         attention_resolutions=(4,),
@@ -126,7 +123,7 @@ if __name__ == "__main__":
 
     # Set up training parameters
     num_epochs = 10000
-    
+
     # Create date-specific folder for saving models
     current_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     savedir = f"./output/unet/{current_date}/"
