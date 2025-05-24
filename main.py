@@ -42,7 +42,7 @@ if __name__ == "__main__":
     os.makedirs("output/unet", exist_ok=True)
 
     # Configuration parameters
-    batch_size = 128
+    batch_size = 64
     num_workers = os.cpu_count() // 2 if os.cpu_count() is not None else 1
     embedding_dim = 32
     learning_rate = 2e-4
@@ -87,9 +87,9 @@ if __name__ == "__main__":
 
     model = UNetModel(
         in_channels=embedding_dim,  # Using embedding dimension instead of one-hot
-        model_channels=128,
+        model_channels=64,
         out_channels=embedding_dim,  # Output will be in embedding space
-        num_res_blocks=2,
+        num_res_blocks=5,
         attention_resolutions=(4,),
         dropout=0.1,
         channel_mult=(1, 2, 4, 8),
