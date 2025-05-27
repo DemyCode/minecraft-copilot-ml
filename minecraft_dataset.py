@@ -6,7 +6,6 @@ Uses sentence transformers to create embeddings for block types.
 """
 
 import os
-import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -31,7 +30,6 @@ class MinecraftSchematicDataset(Dataset):
         self,
         schematics_dir,
         chunk_size=16,
-        transform=None,
         preload=False,
         cache_file=None,
         embedding_cache_file=None,
@@ -45,7 +43,6 @@ class MinecraftSchematicDataset(Dataset):
         Args:
             schematics_dir (str): Directory containing schematic files
             chunk_size (int): Size of the chunks to extract (default: 16)
-            transform (callable, optional): Optional transform to be applied on a sample
             preload (bool): Whether to preload all data into memory (default: False)
             cache_file (str, optional): Path to cache file for block mappings
             embedding_cache_file (str, optional): Path to cache file for block embeddings
@@ -55,7 +52,6 @@ class MinecraftSchematicDataset(Dataset):
         """
         self.schematics_dir = schematics_dir
         self.chunk_size = chunk_size
-        self.transform = transform
         self.preload = preload
         self.min_dimension = min_dimension
         self.embedding_dim = embedding_dim
@@ -142,10 +138,6 @@ class MinecraftSchematicDataset(Dataset):
             else:
                 # Numeric block ID, get name from BLOCK_ID_TO_NAME
                 block_name = BLOCK_ID_TO_NAME.get(block, f"unknown block {block}")
-                # Remove "minecraft:" prefix for better semantic meaning
-                block_name = block_name.replace("minecraft:", "")
-                # Replace underscores with spaces for better semantic meaning
-                block_name = block_name.replace("_", " ")
                 block_names.append(block_name)
 
         # Load the sentence transformer model
@@ -248,7 +240,7 @@ class MinecraftSchematicDataset(Dataset):
             blocks, _ = load_schematic_to_numpy(self.file_info[idx]["path"])
             return blocks
 
-    def _extract_chunk(self, blocks, start_y, start_z, start_x):
+    def _extract_chunk(self, blocks):
         """
         Extract a chunk from the blocks array.
 
@@ -260,38 +252,46 @@ class MinecraftSchematicDataset(Dataset):
             chunk: The extracted chunk
             mask: Mask indicating valid positions (1) vs padding (0)
         """
-        height, length, width = blocks.shape
-        chunk_size = self.chunk_size
-
-        # Initialize chunk and mask with zeros (padding)
-        chunk = np.full(
-            (chunk_size, chunk_size, chunk_size),
-            self.block_to_idx["<pad>"],
-            dtype=np.int64,
+        sliding_window_width = self.chunk_size
+        sliding_window_height = self.chunk_size
+        sliding_window_depth = self.chunk_size
+        block_map = np.full(
+            (sliding_window_width, sliding_window_height, sliding_window_depth),
+            "minecraft:air",
+            dtype=object,
         )
-        mask = np.zeros((chunk_size, chunk_size, chunk_size), dtype=np.int64)
-
-        # Calculate end coordinates (clamped to array dimensions)
-        end_y = min(start_y + chunk_size, height)
-        end_z = min(start_z + chunk_size, length)
-        end_x = min(start_x + chunk_size, width)
-
-        # Calculate actual chunk dimensions
-        chunk_height = end_y - start_y
-        chunk_length = end_z - start_z
-        chunk_width = end_x - start_x
-
-        # Extract the chunk from the blocks array
-        for y in range(chunk_height):
-            for z in range(chunk_length):
-                for x in range(chunk_width):
-                    block_name = blocks[start_y + y, start_z + z, start_x + x]
-                    chunk[y, z, x] = self.block_to_idx.get(
-                        block_name, self.block_to_idx["<unk>"]
-                    )
-                    mask[y, z, x] = 1  # Mark as valid
-
-        return chunk, mask
+        minimum_width = min(sliding_window_width, blocks.shape[0])
+        minimum_height = min(sliding_window_height, blocks.shape[1])
+        minimum_depth = min(sliding_window_depth, blocks.shape[2])
+        x_start = np.random.randint(0, blocks.shape[0] - minimum_width + 1)
+        y_start = np.random.randint(0, blocks.shape[1] - minimum_height + 1)
+        z_start = np.random.randint(0, blocks.shape[2] - minimum_depth + 1)
+        x_end = x_start + minimum_width
+        y_end = y_start + minimum_height
+        z_end = z_start + minimum_depth
+        random_roll_x_value = np.random.randint(
+            0, sliding_window_width - minimum_width + 1
+        )
+        random_roll_y_value = np.random.randint(
+            0, sliding_window_height - minimum_height + 1
+        )
+        random_roll_z_value = np.random.randint(
+            0, sliding_window_depth - minimum_depth + 1
+        )
+        block_map[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_roll_y_value : random_roll_y_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = blocks[x_start:x_end, y_start:y_end, z_start:z_end]
+        block_map = np.vectorize(self.block_to_idx.get)(block_map)
+        block_map = block_map.astype(int)
+        block_map_mask = np.zeros((16, 16, 16), dtype=int)
+        block_map_mask[
+            random_roll_x_value : random_roll_x_value + minimum_width,
+            random_roll_y_value : random_roll_y_value + minimum_height,
+            random_roll_z_value : random_roll_z_value + minimum_depth,
+        ] = 1
+        return block_map, block_map_mask
 
     def __len__(self):
         """Return the number of chunks in the dataset."""
@@ -314,16 +314,8 @@ class MinecraftSchematicDataset(Dataset):
         # Get the blocks array
         blocks = self._get_blocks(idx)
 
-        # Get dimensions
-        height, length, width = blocks.shape
-
-        # Choose a random starting position
-        start_y = random.randint(0, max(0, height - self.chunk_size))
-        start_z = random.randint(0, max(0, length - self.chunk_size))
-        start_x = random.randint(0, max(0, width - self.chunk_size))
-
         # Extract the chunk
-        chunk, mask = self._extract_chunk(blocks, start_y, start_z, start_x)
+        chunk, mask = self._extract_chunk(blocks)
 
         # Convert to tensors
         chunk_tensor = torch.tensor(chunk, dtype=torch.long)
@@ -342,10 +334,6 @@ class MinecraftSchematicDataset(Dataset):
                 for x in range(self.chunk_size):
                     block_idx = chunk_tensor[y, z, x].item()
                     chunk_embeddings[y, z, x] = self.block_embeddings[block_idx]
-
-        # Apply transform if specified
-        if self.transform:
-            chunk_tensor = self.transform(chunk_tensor)
 
         return {
             "blocks": chunk_tensor,  # Original block indices

@@ -34,8 +34,17 @@ def warmup_lr(step, warmup_steps=5000):
     return min(step, warmup_steps) / warmup_steps
 
 
+import argparse
+
 if __name__ == "__main__":
     # Create necessary directories
+    parser = argparse.ArgumentParser(description="Train UNet on Minecraft schematics")
+    parser.add_argument(
+        "--model_path",
+        action="store",
+        required=False,
+    )
+    args = parser.parse_args()
     os.makedirs("cache", exist_ok=True)
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
@@ -99,6 +108,10 @@ if __name__ == "__main__":
         use_checkpoint=False,
         num_heads=4,
     )
+    if args.model_path:
+        checkpoint = torch.load(args.model_path, map_location="cpu")
+    if checkpoint is not None and "net_model" in checkpoint:
+        model.load_state_dict(checkpoint["net_model"])
 
     # Show model size
     model_size = 0
