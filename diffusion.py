@@ -39,6 +39,43 @@ def compute_loss(
 
 
 @torch.no_grad()
+def compute_accuracy(
+    model: torch.nn.Module,
+    blocks: torch.Tensor,
+    condition_mask: torch.Tensor,
+    t: float,
+) -> tuple[float, float]:
+    """
+    Returns (overall_acc, non_air_acc) at masked positions for a fixed noise level t.
+    t=0.2 → easy (little masked), t=0.8 → hard (most masked).
+    non_air_acc ignores positions where the ground truth is air (idx=0).
+    """
+    B = blocks.shape[0]
+    device = blocks.device
+
+    t_tensor = torch.full((B,), t, device=device)
+    unknown = ~condition_mask
+    absorb_prob = t_tensor[:, None, None, None].expand_as(blocks.float())
+    noise_mask = (torch.rand_like(blocks.float()) < absorb_prob) & unknown
+
+    if not noise_mask.any():
+        return 0.0, 0.0
+
+    x_t = blocks.clone()
+    x_t[noise_mask] = model.mask_idx
+
+    logits = model(x_t, condition_mask, t_tensor)
+    preds = logits.argmax(dim=1)
+
+    overall_acc = (preds[noise_mask] == blocks[noise_mask]).float().mean().item()
+
+    non_air_mask = noise_mask & (blocks != 0)
+    non_air_acc = (preds[non_air_mask] == blocks[non_air_mask]).float().mean().item() if non_air_mask.any() else 0.0
+
+    return overall_acc, non_air_acc
+
+
+@torch.no_grad()
 def sample(
     model: torch.nn.Module,
     condition: torch.Tensor,

@@ -5,7 +5,9 @@ description = "Minecraft structure completion via absorbing-state discrete diffu
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "matplotlib>=3.9.0",
     "nbtlib>=2.0.4",
+    "plotly>=5.0.0",
     "torch>=2.7.0",
     "tqdm>=4.66.0",
 ]

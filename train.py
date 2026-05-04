@@ -8,8 +8,9 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
 from dataset import MinecraftDataset
-from diffusion import compute_loss
+from diffusion import compute_loss, compute_accuracy
 from model import UNetTransformer
+from viz import save_sample_viz, save_3d_viz
 
 
 def parse_args():
@@ -151,6 +152,11 @@ def main():
         )
         print(f"\nSaved checkpoint: {path}")
 
+    _viz_loader = DataLoader(val_set, batch_size=10, shuffle=False, num_workers=0)
+    _viz_batch = next(iter(_viz_loader))
+    fixed_viz_blocks = _viz_batch["blocks"].to(device)
+    fixed_viz_mask = _viz_batch["condition_mask"].to(device)
+
     model.train()
     epoch = start_epoch
 
@@ -192,14 +198,33 @@ def main():
             if global_step % args.val_every == 0:
                 model.eval()
                 val_losses = []
+                t_levels = [0.2, 0.5, 0.8]
+                acc_buckets = {t: [] for t in t_levels}
+                non_air_buckets = {t: [] for t in t_levels}
                 with torch.no_grad():
                     for val_batch in val_loader:
                         vb = val_batch["blocks"].to(device)
                         vc = val_batch["condition_mask"].to(device)
-                        vl = compute_loss(model, vb, vc, args.air_weight)
-                        val_losses.append(vl.item())
+                        val_losses.append(compute_loss(model, vb, vc, args.air_weight).item())
+                        for t in t_levels:
+                            acc, non_air_acc = compute_accuracy(model, vb, vc, t)
+                            acc_buckets[t].append(acc)
+                            non_air_buckets[t].append(non_air_acc)
                 avg_val = sum(val_losses) / max(1, len(val_losses))
-                tqdm.write(f"  val_loss={avg_val:.4f}")
+                acc_str = "  ".join(
+                    f"t={t:.1f} acc={sum(acc_buckets[t])/max(1,len(acc_buckets[t])):.3f}"
+                    f" non_air={sum(non_air_buckets[t])/max(1,len(non_air_buckets[t])):.3f}"
+                    for t in t_levels
+                )
+                tqdm.write(f"  val_loss={avg_val:.4f}  {acc_str}")
+
+                viz_path = os.path.join(run_dir, f"viz_step{global_step:07d}.png")
+                save_sample_viz(model, fixed_viz_blocks[:1], fixed_viz_mask[:1], viz_path, global_step)
+
+                viz3d_path = os.path.join(run_dir, f"viz3d_step{global_step:07d}.html")
+                save_3d_viz(model, fixed_viz_blocks, fixed_viz_mask, viz3d_path, global_step, dataset.idx_to_block)
+                tqdm.write(f"  saved viz: {viz_path}  {viz3d_path}")
+
                 model.train()
 
             if global_step % args.save_every == 0:

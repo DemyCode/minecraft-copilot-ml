@@ -30,7 +30,7 @@ def _convert_to_indexed(blocks: np.ndarray, block_to_idx: dict) -> np.ndarray:
     return global_indices[inverse].reshape(blocks.shape)
 
 
-def _build_cache(files: list, chunk_size: int, min_fill: float):
+def _build_cache(files: list, chunk_size: int):
     block_counts: dict = defaultdict(int)
     raw_schematics = []
 
@@ -61,23 +61,19 @@ def _build_cache(files: list, chunk_size: int, min_fill: float):
     indexed_schematics = []
     chunk_index = []
 
+    cs = chunk_size
+    stride = cs // 4
+
     for s_idx, blocks in enumerate(tqdm(raw_schematics, desc="Indexing schematics")):
         indexed = _convert_to_indexed(blocks, block_to_idx)
         indexed_schematics.append(indexed)
 
         h, l, w = indexed.shape
-        cs = chunk_size
-
-        if h < cs or l < cs or w < cs:
-            chunk_index.append((s_idx, -1, -1, -1))
-        else:
-            stride = cs // 2
-            for y in range(0, h - cs + 1, stride):
-                for z in range(0, l - cs + 1, stride):
-                    for x in range(0, w - cs + 1, stride):
-                        chunk = indexed[y : y + cs, z : z + cs, x : x + cs]
-                        if (chunk != 0).mean() >= min_fill:
-                            chunk_index.append((s_idx, y, z, x))
+        ny = max(1, (h - cs) // stride + 1) if h >= cs else 1
+        nz = max(1, (l - cs) // stride + 1) if l >= cs else 1
+        nx = max(1, (w - cs) // stride + 1) if w >= cs else 1
+        count = ny * nz * nx
+        chunk_index.extend([s_idx] * count)
 
     vocab = {"block_to_idx": block_to_idx, "idx_to_block": idx_to_block}
     return vocab, indexed_schematics, chunk_index
@@ -146,6 +142,7 @@ class MinecraftDataset(Dataset):
         cache_dir: str = "cache",
     ):
         self.chunk_size = chunk_size
+        self.min_fill = min_fill
 
         os.makedirs(cache_dir, exist_ok=True)
         vocab_path = os.path.join(cache_dir, "vocab.pkl")
@@ -167,9 +164,7 @@ class MinecraftDataset(Dataset):
                 raise RuntimeError(f"No schematic files found in {data_dirs}")
             print(f"Found {len(files)} schematic files")
 
-            vocab, self._schematics, self._chunk_index = _build_cache(
-                files, chunk_size, min_fill
-            )
+            vocab, self._schematics, self._chunk_index = _build_cache(files, chunk_size)
 
             with open(vocab_path, "wb") as f:
                 pickle.dump(vocab, f)
@@ -189,14 +184,14 @@ class MinecraftDataset(Dataset):
         return len(self._chunk_index)
 
     def __getitem__(self, idx: int) -> dict:
-        s_idx, y, z, x = self._chunk_index[idx]
+        s_idx = self._chunk_index[idx]
         blocks = self._schematics[s_idx]
         cs = self.chunk_size
 
-        if y == -1:
-            chunk = self._pad_chunk(blocks, cs)
-        else:
-            chunk = blocks[y : y + cs, z : z + cs, x : x + cs].copy()
+        for _ in range(10):
+            chunk = self._random_crop(blocks, cs)
+            if (chunk != 0).mean() >= self.min_fill:
+                break
 
         k = random.randint(0, 3)
         if k > 0:
@@ -212,7 +207,7 @@ class MinecraftDataset(Dataset):
             "condition_mask": torch.from_numpy(condition_mask),
         }
 
-    def _pad_chunk(self, blocks: np.ndarray, cs: int) -> np.ndarray:
+    def _random_crop(self, blocks: np.ndarray, cs: int) -> np.ndarray:
         h, l, w = blocks.shape
         chunk = np.zeros((cs, cs, cs), dtype=blocks.dtype)
 
