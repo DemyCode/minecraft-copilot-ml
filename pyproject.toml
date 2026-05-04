@@ -5,7 +5,6 @@ description = "Minecraft structure completion via absorbing-state discrete diffu
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "loguru>=0.7.3",
     "nbtlib>=2.0.4",
     "torch>=2.7.0",
     "tqdm>=4.66.0",

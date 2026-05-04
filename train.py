@@ -33,7 +33,7 @@ def parse_args():
     p.add_argument("--time_dim", type=int, default=256)
     p.add_argument("--air_weight", type=float, default=0.1)
     p.add_argument("--val_fraction", type=float, default=0.05)
-    p.add_argument("--save_every", type=int, default=5000)
+    p.add_argument("--save_every", type=int, default=500)
     p.add_argument("--val_every", type=int, default=1000)
     p.add_argument("--max_steps", type=int, default=500000)
     p.add_argument("--resume", type=str, default=None)
@@ -103,7 +103,9 @@ def main():
         optim, lr_lambda=lambda s: warmup_schedule(s, args.warmup_steps)
     )
 
-    scaler = torch.amp.GradScaler("cuda") if args.amp and device.type == "cuda" else None
+    scaler = (
+        torch.amp.GradScaler("cuda") if args.amp and device.type == "cuda" else None
+    )
 
     run_dir = os.path.join(
         args.output_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -185,9 +187,7 @@ def main():
 
             if global_step % 100 == 0:
                 lr = sched.get_last_lr()[0]
-                tqdm.write(
-                    f"step={global_step:7d}  loss={loss_val:.4f}  lr={lr:.2e}"
-                )
+                tqdm.write(f"step={global_step:7d}  loss={loss_val:.4f}  lr={lr:.2e}")
 
             if global_step % args.val_every == 0:
                 model.eval()
