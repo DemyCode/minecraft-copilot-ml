@@ -69,7 +69,8 @@ def _build_cache(files: list, chunk_size: int, min_fill: float):
         cs = chunk_size
 
         if h < cs or l < cs or w < cs:
-            chunk_index.append((s_idx, -1, -1, -1))
+            if (indexed != 0).mean() >= min_fill:
+                chunk_index.append((s_idx, -1, -1, -1))
         else:
             stride = cs // 2
             for y in range(0, h - cs + 1, stride):
@@ -78,6 +79,8 @@ def _build_cache(files: list, chunk_size: int, min_fill: float):
                         chunk = indexed[y : y + cs, z : z + cs, x : x + cs]
                         if (chunk != 0).mean() >= min_fill:
                             chunk_index.append((s_idx, y, z, x))
+
+    del raw_schematics
 
     vocab = {"block_to_idx": block_to_idx, "idx_to_block": idx_to_block}
     return vocab, indexed_schematics, chunk_index

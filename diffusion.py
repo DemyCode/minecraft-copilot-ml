@@ -12,10 +12,11 @@ def compute_loss(
     device = blocks.device
 
     t = torch.rand(B, device=device)
+    blocks_f = blocks.float()
 
     unknown = ~condition_mask
-    absorb_prob = t[:, None, None, None].expand_as(blocks.float())
-    noise_mask = (torch.rand_like(blocks.float()) < absorb_prob) & unknown
+    absorb_prob = t[:, None, None, None].expand_as(blocks_f)
+    noise_mask = (torch.rand_like(blocks_f) < absorb_prob) & unknown
 
     x_t = blocks.clone()
     x_t[noise_mask] = model.mask_idx
@@ -29,13 +30,11 @@ def compute_loss(
     weight = torch.ones(vocab_size, device=device)
     weight[0] = air_weight
 
-    loss = F.cross_entropy(
+    return F.cross_entropy(
         logits.permute(0, 2, 3, 4, 1)[noise_mask],
         blocks[noise_mask],
         weight=weight,
     )
-
-    return loss
 
 
 @torch.no_grad()
@@ -46,20 +45,14 @@ def compute_accuracy(
     t: float,
     common_cutoff: int = 10,
 ) -> tuple[float, float, float]:
-    """
-    Returns (non_air_acc, common_acc, rare_acc) at masked positions for noise level t.
-    Blocks are indexed by frequency: idx=1 is most common non-air, idx=2 second, etc.
-    common_acc  = top-{common_cutoff} non-air block types (easy, frequency-exploitable)
-    rare_acc    = everything beyond top-{common_cutoff} (hard, tests real understanding)
-    Random baseline for rare_acc ≈ 1 / (vocab_size - common_cutoff).
-    """
     B = blocks.shape[0]
     device = blocks.device
 
     t_tensor = torch.full((B,), t, device=device)
+    blocks_f = blocks.float()
     unknown = ~condition_mask
-    absorb_prob = t_tensor[:, None, None, None].expand_as(blocks.float())
-    noise_mask = (torch.rand_like(blocks.float()) < absorb_prob) & unknown
+    absorb_prob = t_tensor[:, None, None, None].expand_as(blocks_f)
+    noise_mask = (torch.rand_like(blocks_f) < absorb_prob) & unknown
 
     if not noise_mask.any():
         return 0.0, 0.0, 0.0
@@ -82,68 +75,12 @@ def compute_accuracy(
     return non_air_acc, common_acc, rare_acc
 
 
-@torch.no_grad()
-def sample(
+def _sample_steps(
     model: torch.nn.Module,
     condition: torch.Tensor,
     condition_mask: torch.Tensor,
-    num_steps: int = 100,
-    temperature: float = 1.0,
-) -> torch.Tensor:
-    device = condition.device
-    B = condition.shape[0]
-    mask_idx = model.mask_idx
-    vocab_size = model.vocab_size
-
-    x = condition.clone()
-    x[~condition_mask] = mask_idx
-
-    t_steps = torch.linspace(1.0, 0.0, num_steps + 1, device=device)
-
-    for step in range(num_steps):
-        t_now = t_steps[step].item()
-        t_next = t_steps[step + 1].item()
-
-        t_tensor = torch.full((B,), t_now, device=device)
-        logits = model(x, condition_mask, t_tensor)
-
-        flat_logits = logits.permute(0, 2, 3, 4, 1).reshape(-1, vocab_size)
-        if temperature != 1.0:
-            flat_logits = flat_logits / temperature
-        probs = F.softmax(flat_logits, dim=-1)
-        x0_flat = torch.multinomial(probs, 1).squeeze(1)
-        x0 = x0_flat.reshape(B, *condition.shape[1:])
-
-        still_masked = (x == mask_idx) & ~condition_mask
-        if not still_masked.any():
-            break
-
-        if t_now > 1e-6:
-            unmask_prob = (t_now - t_next) / t_now
-            should_unmask = (torch.rand_like(x.float()) < unmask_prob) & still_masked
-        else:
-            should_unmask = still_masked
-
-        x[should_unmask] = x0[should_unmask]
-
-    remaining = (x == mask_idx) & ~condition_mask
-    if remaining.any():
-        t_zero = torch.zeros(B, device=device)
-        logits = model(x, condition_mask, t_zero)
-        x0_final = logits.argmax(dim=1)
-        x[remaining] = x0_final[remaining]
-
-    return x
-
-
-@torch.no_grad()
-def sample_progressive(
-    model: torch.nn.Module,
-    condition: torch.Tensor,
-    condition_mask: torch.Tensor,
-    num_steps: int = 100,
-    temperature: float = 1.0,
-    yield_every: int = 5,
+    num_steps: int,
+    temperature: float,
 ):
     device = condition.device
     B = condition.shape[0]
@@ -156,6 +93,10 @@ def sample_progressive(
     t_steps = torch.linspace(1.0, 0.0, num_steps + 1, device=device)
 
     for step in range(num_steps):
+        still_masked = (x == mask_idx) & ~condition_mask
+        if not still_masked.any():
+            break
+
         t_now = t_steps[step].item()
         t_next = t_steps[step + 1].item()
 
@@ -166,12 +107,7 @@ def sample_progressive(
         if temperature != 1.0:
             flat_logits = flat_logits / temperature
         probs = F.softmax(flat_logits, dim=-1)
-        x0_flat = torch.multinomial(probs, 1).squeeze(1)
-        x0 = x0_flat.reshape(B, *condition.shape[1:])
-
-        still_masked = (x == mask_idx) & ~condition_mask
-        if not still_masked.any():
-            break
+        x0 = torch.multinomial(probs, 1).squeeze(1).reshape(B, *condition.shape[1:])
 
         if t_now > 1e-6:
             unmask_prob = (t_now - t_next) / t_now
@@ -180,14 +116,39 @@ def sample_progressive(
             should_unmask = still_masked
 
         x[should_unmask] = x0[should_unmask]
-
-        if step % yield_every == 0 or step == num_steps - 1:
-            yield x.clone()
+        yield step, x
 
     remaining = (x == mask_idx) & ~condition_mask
     if remaining.any():
         t_zero = torch.zeros(B, device=device)
         logits = model(x, condition_mask, t_zero)
-        x0_final = logits.argmax(dim=1)
-        x[remaining] = x0_final[remaining]
-        yield x.clone()
+        x[remaining] = logits.argmax(dim=1)[remaining]
+
+    yield -1, x
+
+
+@torch.no_grad()
+def sample(
+    model: torch.nn.Module,
+    condition: torch.Tensor,
+    condition_mask: torch.Tensor,
+    num_steps: int = 100,
+    temperature: float = 1.0,
+) -> torch.Tensor:
+    for _, x in _sample_steps(model, condition, condition_mask, num_steps, temperature):
+        pass
+    return x
+
+
+@torch.no_grad()
+def sample_progressive(
+    model: torch.nn.Module,
+    condition: torch.Tensor,
+    condition_mask: torch.Tensor,
+    num_steps: int = 100,
+    temperature: float = 1.0,
+    yield_every: int = 5,
+):
+    for step, x in _sample_steps(model, condition, condition_mask, num_steps, temperature):
+        if step == -1 or step % yield_every == 0 or step == num_steps - 1:
+            yield x.clone()

@@ -139,13 +139,25 @@ def main():
 
     if args.resume:
         ckpt = torch.load(args.resume, map_location=device)
-        model.load_state_dict(ckpt["model"])
+        missing, unexpected = model.load_state_dict(ckpt["model"], strict=False)
+        if missing:
+            print(f"New weights (randomly initialized): {missing}")
+        if unexpected:
+            print(f"Dropped weights (not in model): {unexpected}")
         if "ema_model" in ckpt:
-            ema_model.load_state_dict(ckpt["ema_model"])
-        optim.load_state_dict(ckpt["optim"])
-        sched.load_state_dict(ckpt["sched"])
+            ema_model.load_state_dict(ckpt["ema_model"], strict=False)
         global_step = ckpt["step"]
         start_epoch = ckpt["epoch"]
+        try:
+            optim.load_state_dict(ckpt["optim"])
+            sched.load_state_dict(ckpt["sched"])
+        except (ValueError, RuntimeError):
+            print("Optimizer state incompatible — fresh optimizer, scheduler fast-forwarded")
+            sched = torch.optim.lr_scheduler.LambdaLR(
+                optim,
+                lr_lambda=lambda s: lr_schedule(s, args.warmup_steps, args.max_steps),
+                last_epoch=global_step - 1,
+            )
         print(f"Resumed from step {global_step}")
 
     def save_checkpoint(step: int, epoch: int):

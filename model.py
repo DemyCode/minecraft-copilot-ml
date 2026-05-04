@@ -72,7 +72,6 @@ class Upsample3D(nn.Module):
 class TransformerBottleneck(nn.Module):
     def __init__(self, dim: int, num_layers: int, num_heads: int, spatial_size: int = 4, time_dim: int = 256):
         super().__init__()
-        self.spatial_size = spatial_size
         num_tokens = spatial_size ** 3
         self.pos_emb = nn.Parameter(torch.randn(1, num_tokens, dim) * 0.02)
         self.time_proj = nn.Linear(time_dim, dim)
@@ -136,8 +135,6 @@ class UNetTransformer(nn.Module):
             skips.append(in_ch)
             if i < len(ch) - 1:
                 self.enc_downs.append(Downsample3D(in_ch))
-            else:
-                self.enc_downs.append(nn.Identity())
 
         self.bottleneck = TransformerBottleneck(
             bottleneck_ch, transformer_layers, transformer_heads, bottleneck_spatial, time_dim
@@ -177,12 +174,12 @@ class UNetTransformer(nn.Module):
         h = self.conv_in(torch.cat([emb, cond], dim=1))
 
         skips_out = []
-        for i, (res_blocks, down) in enumerate(zip(self.enc_blocks, self.enc_downs)):
+        for i, res_blocks in enumerate(self.enc_blocks):
             for blk in res_blocks:
                 h = blk(h, t_emb)
             skips_out.append(h)
-            if i < len(self.enc_downs) - 1:
-                h = down(h)
+            if i < len(self.enc_downs):
+                h = self.enc_downs[i](h)
 
         h = self.bottleneck(h, t_emb)
 
