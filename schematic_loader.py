@@ -130,7 +130,7 @@ def load_schematic(file_path: str) -> np.ndarray:
         raw = np.pad(raw, (0, total - len(raw)))
     raw = (raw[:total] & 0xFF).reshape(height, length, width)
     max_id = 256
-    lookup = np.full(max_id, "minecraft:stone", dtype=object)
+    lookup = np.full(max_id, "minecraft:air", dtype=object)
     for k, v in BLOCK_ID_TO_NAME.items():
         if k < max_id:
             lookup[k] = v

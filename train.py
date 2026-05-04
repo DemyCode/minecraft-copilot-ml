@@ -1,4 +1,6 @@
 import argparse
+import copy
+import math
 import os
 import pickle
 from datetime import datetime
@@ -33,6 +35,7 @@ def parse_args():
     p.add_argument("--transformer_heads", type=int, default=8)
     p.add_argument("--time_dim", type=int, default=256)
     p.add_argument("--air_weight", type=float, default=0.1)
+    p.add_argument("--ema_decay", type=float, default=0.9999)
     p.add_argument("--val_fraction", type=float, default=0.05)
     p.add_argument("--save_every", type=int, default=500)
     p.add_argument("--val_every", type=int, default=1000)
@@ -42,10 +45,11 @@ def parse_args():
     return p.parse_args()
 
 
-def warmup_schedule(step: int, warmup_steps: int) -> float:
+def lr_schedule(step: int, warmup_steps: int, max_steps: int) -> float:
     if step < warmup_steps:
         return step / warmup_steps
-    return 1.0
+    progress = (step - warmup_steps) / max(1, max_steps - warmup_steps)
+    return 0.5 * (1.0 + math.cos(math.pi * progress))
 
 
 def main():
@@ -92,16 +96,22 @@ def main():
         time_dim=args.time_dim,
         transformer_layers=args.transformer_layers,
         transformer_heads=args.transformer_heads,
+        chunk_size=args.chunk_size,
     ).to(device)
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {n_params / 1e6:.1f}M")
 
+    ema_model = copy.deepcopy(model)
+    for p in ema_model.parameters():
+        p.requires_grad_(False)
+    ema_model.eval()
+
     optim = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
     sched = torch.optim.lr_scheduler.LambdaLR(
-        optim, lr_lambda=lambda s: warmup_schedule(s, args.warmup_steps)
+        optim, lr_lambda=lambda s: lr_schedule(s, args.warmup_steps, args.max_steps)
     )
 
     scaler = (
@@ -130,6 +140,8 @@ def main():
     if args.resume:
         ckpt = torch.load(args.resume, map_location=device)
         model.load_state_dict(ckpt["model"])
+        if "ema_model" in ckpt:
+            ema_model.load_state_dict(ckpt["ema_model"])
         optim.load_state_dict(ckpt["optim"])
         sched.load_state_dict(ckpt["sched"])
         global_step = ckpt["step"]
@@ -141,6 +153,7 @@ def main():
         torch.save(
             {
                 "model": model.state_dict(),
+                "ema_model": ema_model.state_dict(),
                 "optim": optim.state_dict(),
                 "sched": sched.state_dict(),
                 "step": step,
@@ -186,6 +199,10 @@ def main():
 
             sched.step()
 
+            with torch.no_grad():
+                for p_ema, p in zip(ema_model.parameters(), model.parameters()):
+                    p_ema.lerp_(p, 1.0 - args.ema_decay)
+
             loss_val = loss.item()
             epoch_loss += loss_val
             epoch_steps += 1
@@ -226,10 +243,10 @@ def main():
                 tqdm.write("\n".join(lines))
 
                 viz_path = os.path.join(run_dir, f"viz_step{global_step:07d}.png")
-                save_sample_viz(model, fixed_viz_blocks[:1], fixed_viz_mask[:1], viz_path, global_step)
+                save_sample_viz(ema_model, fixed_viz_blocks[:1], fixed_viz_mask[:1], viz_path, global_step)
 
                 viz3d_path = os.path.join(run_dir, f"viz3d_step{global_step:07d}.html")
-                save_3d_viz(model, fixed_viz_blocks, fixed_viz_mask, viz3d_path, global_step, dataset.idx_to_block)
+                save_3d_viz(ema_model, fixed_viz_blocks, fixed_viz_mask, viz3d_path, global_step, dataset.idx_to_block)
                 tqdm.write(f"  saved viz: {viz_path}  {viz3d_path}")
 
                 model.train()

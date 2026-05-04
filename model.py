@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -72,26 +70,27 @@ class Upsample3D(nn.Module):
 
 
 class TransformerBottleneck(nn.Module):
-    def __init__(self, dim: int, num_layers: int, num_heads: int, spatial_size: int = 4):
+    def __init__(self, dim: int, num_layers: int, num_heads: int, spatial_size: int = 4, time_dim: int = 256):
         super().__init__()
         self.spatial_size = spatial_size
         num_tokens = spatial_size ** 3
         self.pos_emb = nn.Parameter(torch.randn(1, num_tokens, dim) * 0.02)
+        self.time_proj = nn.Linear(time_dim, dim)
         layer = nn.TransformerEncoderLayer(
             d_model=dim,
             nhead=num_heads,
             dim_feedforward=dim * 4,
-            dropout=0.0,
+            dropout=0.1,
             activation="gelu",
             batch_first=True,
             norm_first=True,
         )
         self.transformer = nn.TransformerEncoder(layer, num_layers=num_layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
         B, C, D, H, W = x.shape
         x = x.reshape(B, C, -1).permute(0, 2, 1)
-        x = x + self.pos_emb
+        x = x + self.pos_emb + self.time_proj(t_emb).unsqueeze(1)
         x = self.transformer(x)
         x = x.permute(0, 2, 1).reshape(B, C, D, H, W)
         return x
@@ -108,6 +107,7 @@ class UNetTransformer(nn.Module):
         time_dim: int = 256,
         transformer_layers: int = 8,
         transformer_heads: int = 8,
+        chunk_size: int = 32,
     ):
         super().__init__()
 
@@ -116,7 +116,7 @@ class UNetTransformer(nn.Module):
 
         ch = [base_channels * m for m in channel_mult]
         bottleneck_ch = ch[-1]
-        bottleneck_spatial = 4
+        bottleneck_spatial = chunk_size // (2 ** (len(channel_mult) - 1))
 
         self.block_emb = nn.Embedding(vocab_size + 1, embed_dim)
         self.time_emb = SinusoidalTimeEmbedding(time_dim)
@@ -140,7 +140,7 @@ class UNetTransformer(nn.Module):
                 self.enc_downs.append(nn.Identity())
 
         self.bottleneck = TransformerBottleneck(
-            bottleneck_ch, transformer_layers, transformer_heads, bottleneck_spatial
+            bottleneck_ch, transformer_layers, transformer_heads, bottleneck_spatial, time_dim
         )
 
         self.dec_ups = nn.ModuleList()
@@ -177,20 +177,20 @@ class UNetTransformer(nn.Module):
         h = self.conv_in(torch.cat([emb, cond], dim=1))
 
         skips_out = []
-        for i, (blocks, down) in enumerate(zip(self.enc_blocks, self.enc_downs)):
-            for blk in blocks:
+        for i, (res_blocks, down) in enumerate(zip(self.enc_blocks, self.enc_downs)):
+            for blk in res_blocks:
                 h = blk(h, t_emb)
             skips_out.append(h)
             if i < len(self.enc_downs) - 1:
                 h = down(h)
 
-        h = self.bottleneck(h)
+        h = self.bottleneck(h, t_emb)
 
         skips_out = list(reversed(skips_out))
-        for i, (up, blocks) in enumerate(zip(self.dec_ups, self.dec_blocks)):
+        for i, (up, res_blocks) in enumerate(zip(self.dec_ups, self.dec_blocks)):
             h = up(h)
             h = torch.cat([h, skips_out[i + 1]], dim=1)
-            for blk in blocks:
+            for blk in res_blocks:
                 h = blk(h, t_emb)
 
         h = F.silu(self.norm_out(h))

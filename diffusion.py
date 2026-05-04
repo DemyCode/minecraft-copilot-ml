@@ -17,13 +17,13 @@ def compute_loss(
     absorb_prob = t[:, None, None, None].expand_as(blocks.float())
     noise_mask = (torch.rand_like(blocks.float()) < absorb_prob) & unknown
 
-    if not noise_mask.any():
-        return torch.tensor(0.0, device=device, requires_grad=True)
-
     x_t = blocks.clone()
     x_t[noise_mask] = model.mask_idx
 
     logits = model(x_t, condition_mask, t)
+
+    if not noise_mask.any():
+        return logits.sum() * 0.0
 
     vocab_size = logits.shape[1]
     weight = torch.ones(vocab_size, device=device)

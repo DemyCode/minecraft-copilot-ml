@@ -27,6 +27,7 @@ def load_model_and_vocab(checkpoint_path: str, device: torch.device):
         time_dim=args.get("time_dim", 256),
         transformer_layers=args.get("transformer_layers", 8),
         transformer_heads=args.get("transformer_heads", 8),
+        chunk_size=args.get("chunk_size", 32),
     ).to(device)
 
     model.load_state_dict(ckpt["model"])
@@ -65,10 +66,9 @@ def complete_structure(
 
     def decode(tensor: torch.Tensor) -> np.ndarray:
         arr = tensor.squeeze(0).cpu().numpy()
-        result = np.empty((cs, cs, cs), dtype=object)
-        for i in np.ndindex(cs, cs, cs):
-            result[i] = idx_to_block.get(int(arr[i]), "minecraft:air")
-        return result
+        max_idx = int(arr.max()) + 1
+        lookup = np.array([idx_to_block.get(i, "minecraft:air") for i in range(max_idx)], dtype=object)
+        return lookup[arr]
 
     if progressive:
         def gen():
