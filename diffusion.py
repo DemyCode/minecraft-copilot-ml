@@ -44,11 +44,14 @@ def compute_accuracy(
     blocks: torch.Tensor,
     condition_mask: torch.Tensor,
     t: float,
-) -> tuple[float, float]:
+    common_cutoff: int = 10,
+) -> tuple[float, float, float]:
     """
-    Returns (overall_acc, non_air_acc) at masked positions for a fixed noise level t.
-    t=0.2 → easy (little masked), t=0.8 → hard (most masked).
-    non_air_acc ignores positions where the ground truth is air (idx=0).
+    Returns (non_air_acc, common_acc, rare_acc) at masked positions for noise level t.
+    Blocks are indexed by frequency: idx=1 is most common non-air, idx=2 second, etc.
+    common_acc  = top-{common_cutoff} non-air block types (easy, frequency-exploitable)
+    rare_acc    = everything beyond top-{common_cutoff} (hard, tests real understanding)
+    Random baseline for rare_acc ≈ 1 / (vocab_size - common_cutoff).
     """
     B = blocks.shape[0]
     device = blocks.device
@@ -59,7 +62,7 @@ def compute_accuracy(
     noise_mask = (torch.rand_like(blocks.float()) < absorb_prob) & unknown
 
     if not noise_mask.any():
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
 
     x_t = blocks.clone()
     x_t[noise_mask] = model.mask_idx
@@ -67,12 +70,16 @@ def compute_accuracy(
     logits = model(x_t, condition_mask, t_tensor)
     preds = logits.argmax(dim=1)
 
-    overall_acc = (preds[noise_mask] == blocks[noise_mask]).float().mean().item()
-
     non_air_mask = noise_mask & (blocks != 0)
     non_air_acc = (preds[non_air_mask] == blocks[non_air_mask]).float().mean().item() if non_air_mask.any() else 0.0
 
-    return overall_acc, non_air_acc
+    common_mask = noise_mask & (blocks > 0) & (blocks <= common_cutoff)
+    common_acc = (preds[common_mask] == blocks[common_mask]).float().mean().item() if common_mask.any() else 0.0
+
+    rare_mask = noise_mask & (blocks > common_cutoff)
+    rare_acc = (preds[rare_mask] == blocks[rare_mask]).float().mean().item() if rare_mask.any() else 0.0
+
+    return non_air_acc, common_acc, rare_acc
 
 
 @torch.no_grad()

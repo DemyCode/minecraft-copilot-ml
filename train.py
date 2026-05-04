@@ -198,25 +198,32 @@ def main():
             if global_step % args.val_every == 0:
                 model.eval()
                 val_losses = []
-                t_levels = [0.2, 0.5, 0.8]
-                acc_buckets = {t: [] for t in t_levels}
+                t_levels = [0.5, 0.8]
                 non_air_buckets = {t: [] for t in t_levels}
+                common_buckets  = {t: [] for t in t_levels}
+                rare_buckets    = {t: [] for t in t_levels}
                 with torch.no_grad():
                     for val_batch in val_loader:
                         vb = val_batch["blocks"].to(device)
                         vc = val_batch["condition_mask"].to(device)
                         val_losses.append(compute_loss(model, vb, vc, args.air_weight).item())
                         for t in t_levels:
-                            acc, non_air_acc = compute_accuracy(model, vb, vc, t)
-                            acc_buckets[t].append(acc)
-                            non_air_buckets[t].append(non_air_acc)
-                avg_val = sum(val_losses) / max(1, len(val_losses))
-                acc_str = "  ".join(
-                    f"t={t:.1f} acc={sum(acc_buckets[t])/max(1,len(acc_buckets[t])):.3f}"
-                    f" non_air={sum(non_air_buckets[t])/max(1,len(non_air_buckets[t])):.3f}"
-                    for t in t_levels
-                )
-                tqdm.write(f"  val_loss={avg_val:.4f}  {acc_str}")
+                            non_air, common, rare = compute_accuracy(model, vb, vc, t)
+                            non_air_buckets[t].append(non_air)
+                            common_buckets[t].append(common)
+                            rare_buckets[t].append(rare)
+
+                def avg(lst): return sum(lst) / max(1, len(lst))
+
+                avg_val = avg(val_losses)
+                lines = [f"  val_loss={avg_val:.4f}"]
+                for t in t_levels:
+                    lines.append(
+                        f"  t={t:.1f}  non_air={avg(non_air_buckets[t]):.3f}"
+                        f"  common={avg(common_buckets[t]):.3f}"
+                        f"  rare={avg(rare_buckets[t]):.3f}"
+                    )
+                tqdm.write("\n".join(lines))
 
                 viz_path = os.path.join(run_dir, f"viz_step{global_step:07d}.png")
                 save_sample_viz(model, fixed_viz_blocks[:1], fixed_viz_mask[:1], viz_path, global_step)
