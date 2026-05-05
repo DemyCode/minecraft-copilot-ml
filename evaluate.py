@@ -199,10 +199,10 @@ def main():
     p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--n_runs", type=int, default=1)
     p.add_argument("--output", default="eval.html")
-    p.add_argument("--device", default="cuda")
+    p.add_argument("--device", default=None)
     args = p.parse_args()
 
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
     model, vocab, cs = load_model(args.checkpoint, device)
     block_to_idx = vocab["block_to_idx"]
     idx_to_block = vocab["idx_to_block"]

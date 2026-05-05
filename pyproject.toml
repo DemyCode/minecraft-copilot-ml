@@ -3,13 +3,18 @@ name = "minecraft-copilot-ml"
 version = "0.1.0"
 description = "Minecraft structure completion via absorbing-state discrete diffusion"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
+    "curl-cffi>=0.15.0",
     "matplotlib>=3.9.0",
     "nbtlib>=2.0.4",
+    "playwright>=1.59.0",
     "plotly>=5.0.0",
+    "requests>=2.33.1",
+    "selenium>=4.43.0",
     "torch>=2.7.0",
     "tqdm>=4.66.0",
+    "writcache",
 ]
 
 [[tool.uv.index]]
@@ -19,3 +24,6 @@ explicit = true
 
 [[tool.uv.index]]
 url = "https://pypi.org/simple"
+
+[tool.uv.sources]
+writcache = { git = "https://github.com/DemyCode/writcache.git" }

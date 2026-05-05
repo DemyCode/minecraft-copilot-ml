@@ -7,6 +7,7 @@ def compute_loss(
     blocks: torch.Tensor,
     condition_mask: torch.Tensor,
     air_weight: float = 0.1,
+    valid_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     B = blocks.shape[0]
     device = blocks.device
@@ -23,7 +24,10 @@ def compute_loss(
 
     logits = model(x_t, condition_mask, t)
 
-    if not noise_mask.any():
+    # Restrict loss to valid (non-padded) positions
+    loss_mask = noise_mask & valid_mask if valid_mask is not None else noise_mask
+
+    if not loss_mask.any():
         return logits.sum() * 0.0
 
     vocab_size = logits.shape[1]
@@ -31,8 +35,8 @@ def compute_loss(
     weight[0] = air_weight
 
     return F.cross_entropy(
-        logits.permute(0, 2, 3, 4, 1)[noise_mask],
-        blocks[noise_mask],
+        logits.permute(0, 2, 3, 4, 1)[loss_mask],
+        blocks[loss_mask],
         weight=weight,
     )
 

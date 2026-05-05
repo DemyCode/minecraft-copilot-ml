@@ -41,6 +41,7 @@ def parse_args():
     p.add_argument("--val_every", type=int, default=1000)
     p.add_argument("--max_steps", type=int, default=500000)
     p.add_argument("--resume", type=str, default=None)
+    p.add_argument("--device", type=str, default=None)
     p.add_argument("--amp", action="store_true", default=True)
     return p.parse_args()
 
@@ -55,7 +56,7 @@ def lr_schedule(step: int, warmup_steps: int, max_steps: int) -> float:
 def main():
     args = parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
     print(f"Device: {device}")
 
     dataset = MinecraftDataset(
@@ -194,10 +195,11 @@ def main():
         for batch in tqdm(train_loader, desc=f"Epoch {epoch}", leave=False):
             blocks = batch["blocks"].to(device)
             condition_mask = batch["condition_mask"].to(device)
+            valid_mask = batch["valid_mask"].to(device)
 
             if scaler is not None:
                 with torch.amp.autocast("cuda"):
-                    loss = compute_loss(model, blocks, condition_mask, args.air_weight)
+                    loss = compute_loss(model, blocks, condition_mask, args.air_weight, valid_mask)
                 optim.zero_grad()
                 scaler.scale(loss).backward()
                 scaler.unscale_(optim)
@@ -205,7 +207,7 @@ def main():
                 scaler.step(optim)
                 scaler.update()
             else:
-                loss = compute_loss(model, blocks, condition_mask, args.air_weight)
+                loss = compute_loss(model, blocks, condition_mask, args.air_weight, valid_mask)
                 optim.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -237,8 +239,9 @@ def main():
                     for val_batch in val_loader:
                         vb = val_batch["blocks"].to(device)
                         vc = val_batch["condition_mask"].to(device)
+                        vv = val_batch["valid_mask"].to(device)
                         val_losses.append(
-                            compute_loss(model, vb, vc, args.air_weight).item()
+                            compute_loss(model, vb, vc, args.air_weight, vv).item()
                         )
                         for t in t_levels:
                             non_air, common, rare = compute_accuracy(model, vb, vc, t)

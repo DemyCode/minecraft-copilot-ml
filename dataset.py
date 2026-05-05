@@ -1,12 +1,13 @@
 import os
-import pickle
 import random
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
+from writcache import cache, CacheConfig
 
 from schematic_loader import load_schematic
 
@@ -30,13 +31,13 @@ def _convert_to_indexed(blocks: np.ndarray, block_to_idx: dict) -> np.ndarray:
     return global_indices[inverse].reshape(blocks.shape)
 
 
-def _build_cache(files: list, chunk_size: int, min_fill: float):
+def _build_cache(files: list[Path], chunk_size: int, min_fill: float):
     block_counts: dict = defaultdict(int)
     raw_schematics = []
 
     for f in tqdm(files, desc="Scanning schematics"):
         try:
-            blocks = load_schematic(f)
+            blocks = load_schematic(str(f))
             for name in np.unique(blocks):
                 block_counts[str(name)] += 1
             raw_schematics.append(blocks)
@@ -142,38 +143,18 @@ class MinecraftDataset(Dataset):
         data_dirs: list,
         chunk_size: int = 32,
         min_fill: float = 0.10,
-        cache_dir: str = "cache",
+        cache_dir: str = ".writcache",
     ):
         self.chunk_size = chunk_size
 
-        os.makedirs(cache_dir, exist_ok=True)
-        vocab_path = os.path.join(cache_dir, "vocab.pkl")
-        data_path = os.path.join(cache_dir, "schematics.pkl")
-        index_path = os.path.join(cache_dir, "chunk_index.pkl")
+        files = _find_schematic_files(data_dirs)
+        if not files:
+            raise RuntimeError(f"No schematic files found in {data_dirs}")
+        print(f"Found {len(files)} schematic files")
 
-        if all(os.path.exists(p) for p in [vocab_path, data_path, index_path]):
-            print("Loading dataset cache...")
-            with open(vocab_path, "rb") as f:
-                vocab = pickle.load(f)
-            with open(data_path, "rb") as f:
-                self._schematics = pickle.load(f)
-            with open(index_path, "rb") as f:
-                self._chunk_index = pickle.load(f)
-        else:
-            print("Building dataset cache (first run only)...")
-            files = _find_schematic_files(data_dirs)
-            if not files:
-                raise RuntimeError(f"No schematic files found in {data_dirs}")
-            print(f"Found {len(files)} schematic files")
-
-            vocab, self._schematics, self._chunk_index = _build_cache(files, chunk_size, min_fill)
-
-            with open(vocab_path, "wb") as f:
-                pickle.dump(vocab, f)
-            with open(data_path, "wb") as f:
-                pickle.dump(self._schematics, f)
-            with open(index_path, "wb") as f:
-                pickle.dump(self._chunk_index, f)
+        cfg = CacheConfig(cache_dir=Path(cache_dir))
+        path_files = [Path(f) for f in files]
+        vocab, self._schematics, self._chunk_index = cache(_build_cache, config=cfg)(path_files, chunk_size, min_fill)
 
         self.block_to_idx: dict = vocab["block_to_idx"]
         self.idx_to_block: dict = vocab["idx_to_block"]
@@ -191,27 +172,32 @@ class MinecraftDataset(Dataset):
         cs = self.chunk_size
 
         if y == -1:
-            chunk = self._pad_chunk(blocks, cs)
+            chunk, valid_mask = self._pad_chunk(blocks, cs)
         else:
             chunk = blocks[y : y + cs, z : z + cs, x : x + cs].copy()
+            valid_mask = np.ones((cs, cs, cs), dtype=bool)
 
         k = random.randint(0, 3)
         if k > 0:
             chunk = np.rot90(chunk, k, axes=(1, 2)).copy()
+            valid_mask = np.rot90(valid_mask, k, axes=(1, 2)).copy()
 
         if random.random() < 0.5:
             chunk = chunk[:, :, ::-1].copy()
+            valid_mask = valid_mask[:, :, ::-1].copy()
 
         condition_mask = _sample_condition_mask(cs)
 
         return {
             "blocks": torch.from_numpy(chunk.astype(np.int64)),
             "condition_mask": torch.from_numpy(condition_mask),
+            "valid_mask": torch.from_numpy(valid_mask),
         }
 
-    def _pad_chunk(self, blocks: np.ndarray, cs: int) -> np.ndarray:
+    def _pad_chunk(self, blocks: np.ndarray, cs: int) -> tuple[np.ndarray, np.ndarray]:
         h, l, w = blocks.shape
         chunk = np.zeros((cs, cs, cs), dtype=blocks.dtype)
+        valid_mask = np.zeros((cs, cs, cs), dtype=bool)
 
         def slices(dim_size):
             if dim_size >= cs:
@@ -225,4 +211,5 @@ class MinecraftDataset(Dataset):
         z_src, z_dst = slices(l)
         x_src, x_dst = slices(w)
         chunk[y_dst, z_dst, x_dst] = blocks[y_src, z_src, x_src]
-        return chunk
+        valid_mask[y_dst, z_dst, x_dst] = True
+        return chunk, valid_mask
