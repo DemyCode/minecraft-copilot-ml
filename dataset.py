@@ -24,7 +24,7 @@ def _find_schematic_files(dirs):
 def _convert_to_indexed(blocks: np.ndarray, block_to_idx: dict) -> np.ndarray:
     unique_names, inverse = np.unique(blocks, return_inverse=True)
     global_indices = np.array(
-        [block_to_idx.get(str(n), block_to_idx.get("minecraft:air", 0)) for n in unique_names],
+        [block_to_idx.get(str(n), 0) for n in unique_names],
         dtype=np.int16,
     )
     return global_indices[inverse].reshape(blocks.shape)
@@ -45,12 +45,8 @@ def _build_cache(files: list, chunk_size: int, min_fill: float):
 
     sorted_blocks = sorted(block_counts.items(), key=lambda x: -x[1])
 
-    block_to_idx: dict = {}
-    idx_to_block: dict = {}
-
-    block_to_idx["minecraft:air"] = 0
-    idx_to_block[0] = "minecraft:air"
-
+    block_to_idx: dict = {"minecraft:air": 0}
+    idx_to_block: dict = {0: "minecraft:air"}
     next_idx = 1
     for name, _ in sorted_blocks:
         if name not in block_to_idx:

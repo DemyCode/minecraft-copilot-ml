@@ -4,7 +4,7 @@ import nbtlib
 BLOCK_ID_TO_NAME = {
     0: "minecraft:air", 1: "minecraft:stone", 2: "minecraft:grass_block",
     3: "minecraft:dirt", 4: "minecraft:cobblestone", 5: "minecraft:oak_planks",
-    6: "minecraft:sapling", 7: "minecraft:bedrock", 8: "minecraft:water",
+    6: "minecraft:oak_sapling", 7: "minecraft:bedrock", 8: "minecraft:water",
     9: "minecraft:water", 10: "minecraft:lava", 11: "minecraft:lava",
     12: "minecraft:sand", 13: "minecraft:gravel", 14: "minecraft:gold_ore",
     15: "minecraft:iron_ore", 16: "minecraft:coal_ore", 17: "minecraft:oak_log",
@@ -16,7 +16,7 @@ BLOCK_ID_TO_NAME = {
     33: "minecraft:piston", 34: "minecraft:piston_head", 35: "minecraft:white_wool",
     37: "minecraft:dandelion", 38: "minecraft:poppy", 39: "minecraft:brown_mushroom",
     40: "minecraft:red_mushroom", 41: "minecraft:gold_block", 42: "minecraft:iron_block",
-    43: "minecraft:stone_slab", 44: "minecraft:stone_slab", 45: "minecraft:bricks",
+    43: "minecraft:smooth_stone", 44: "minecraft:stone_slab", 45: "minecraft:bricks",
     46: "minecraft:tnt", 47: "minecraft:bookshelf", 48: "minecraft:mossy_cobblestone",
     49: "minecraft:obsidian", 50: "minecraft:torch", 51: "minecraft:fire",
     52: "minecraft:spawner", 53: "minecraft:oak_stairs", 54: "minecraft:chest",
@@ -98,8 +98,124 @@ BLOCK_ID_TO_NAME = {
     252: "minecraft:white_concrete_powder", 255: "minecraft:structure_block",
 }
 
+_COLORS = [
+    "white", "orange", "magenta", "light_blue", "yellow", "lime",
+    "pink", "gray", "light_gray", "cyan", "purple", "blue",
+    "brown", "green", "red", "black",
+]
+
+def _colored(base, data):
+    return {(data_val, f"minecraft:{color}_{base}") for data_val, color in enumerate(_COLORS)}
+
+BLOCK_ID_DATA_TO_NAME = {
+    # Stone variants
+    (1, 1): "minecraft:granite", (1, 2): "minecraft:polished_granite",
+    (1, 3): "minecraft:diorite", (1, 4): "minecraft:polished_diorite",
+    (1, 5): "minecraft:andesite", (1, 6): "minecraft:polished_andesite",
+    # Dirt
+    (3, 1): "minecraft:coarse_dirt", (3, 2): "minecraft:podzol",
+    # Planks
+    (5, 1): "minecraft:spruce_planks", (5, 2): "minecraft:birch_planks",
+    (5, 3): "minecraft:jungle_planks", (5, 4): "minecraft:acacia_planks",
+    (5, 5): "minecraft:dark_oak_planks",
+    # Saplings
+    (6, 1): "minecraft:spruce_sapling", (6, 2): "minecraft:birch_sapling",
+    (6, 3): "minecraft:jungle_sapling", (6, 4): "minecraft:acacia_sapling",
+    (6, 5): "minecraft:dark_oak_sapling",
+    # Sand
+    (12, 1): "minecraft:red_sand",
+    # Logs (data & 3 = type, regardless of orientation bits)
+    **{(17, d): n for d, n in {
+        0: "minecraft:oak_log", 1: "minecraft:spruce_log",
+        2: "minecraft:birch_log", 3: "minecraft:jungle_log",
+        4: "minecraft:oak_log", 5: "minecraft:spruce_log",
+        6: "minecraft:birch_log", 7: "minecraft:jungle_log",
+        8: "minecraft:oak_log", 9: "minecraft:spruce_log",
+        10: "minecraft:birch_log", 11: "minecraft:jungle_log",
+    }.items()},
+    # Leaves (data & 3 = type)
+    **{(18, d): n for d, n in {
+        0: "minecraft:oak_leaves", 1: "minecraft:spruce_leaves",
+        2: "minecraft:birch_leaves", 3: "minecraft:jungle_leaves",
+        4: "minecraft:oak_leaves", 5: "minecraft:spruce_leaves",
+        6: "minecraft:birch_leaves", 7: "minecraft:jungle_leaves",
+        8: "minecraft:oak_leaves", 9: "minecraft:spruce_leaves",
+        10: "minecraft:birch_leaves", 11: "minecraft:jungle_leaves",
+        12: "minecraft:oak_leaves", 13: "minecraft:spruce_leaves",
+        14: "minecraft:birch_leaves", 15: "minecraft:jungle_leaves",
+    }.items()},
+    # Sponge
+    (19, 1): "minecraft:wet_sponge",
+    # Sandstone
+    (24, 1): "minecraft:chiseled_sandstone", (24, 2): "minecraft:smooth_sandstone",
+    # Wool (16 colors)
+    **{(35, d): f"minecraft:{c}_wool" for d, c in enumerate(_COLORS)},
+    # Double slabs
+    (43, 0): "minecraft:smooth_stone", (43, 1): "minecraft:sandstone",
+    (43, 2): "minecraft:oak_planks", (43, 3): "minecraft:cobblestone",
+    (43, 4): "minecraft:bricks", (43, 5): "minecraft:stone_bricks",
+    (43, 6): "minecraft:nether_bricks", (43, 7): "minecraft:quartz_block",
+    # Stone slabs
+    **{(44, d % 8): n for d, n in enumerate([
+        "minecraft:stone_slab", "minecraft:sandstone_slab", "minecraft:oak_slab",
+        "minecraft:cobblestone_slab", "minecraft:brick_slab", "minecraft:stone_brick_slab",
+        "minecraft:nether_brick_slab", "minecraft:quartz_slab",
+    ])},
+    **{(44, d + 8): n for d, n in enumerate([
+        "minecraft:stone_slab", "minecraft:sandstone_slab", "minecraft:oak_slab",
+        "minecraft:cobblestone_slab", "minecraft:brick_slab", "minecraft:stone_brick_slab",
+        "minecraft:nether_brick_slab", "minecraft:quartz_slab",
+    ])},
+    # Stained glass (16 colors)
+    **{(95, d): f"minecraft:{c}_stained_glass" for d, c in enumerate(_COLORS)},
+    # Stone bricks
+    (98, 1): "minecraft:mossy_stone_bricks", (98, 2): "minecraft:cracked_stone_bricks",
+    (98, 3): "minecraft:chiseled_stone_bricks",
+    # Cobblestone wall
+    (139, 1): "minecraft:mossy_cobblestone_wall",
+    # Hardened clay / terracotta (16 colors)
+    **{(159, d): f"minecraft:{c}_terracotta" for d, c in enumerate(_COLORS)},
+    # Stained glass panes (16 colors)
+    **{(160, d): f"minecraft:{c}_stained_glass_pane" for d, c in enumerate(_COLORS)},
+    # Acacia / dark oak logs
+    **{(162, d): n for d, n in {
+        0: "minecraft:acacia_log", 1: "minecraft:dark_oak_log",
+        4: "minecraft:acacia_log", 5: "minecraft:dark_oak_log",
+        8: "minecraft:acacia_log", 9: "minecraft:dark_oak_log",
+    }.items()},
+    # Carpet (16 colors)
+    **{(171, d): f"minecraft:{c}_carpet" for d, c in enumerate(_COLORS)},
+    # Red sandstone
+    (179, 1): "minecraft:chiseled_red_sandstone", (179, 2): "minecraft:smooth_red_sandstone",
+    # Quartz
+    (155, 1): "minecraft:chiseled_quartz_block", (155, 2): "minecraft:quartz_pillar",
+    (155, 3): "minecraft:quartz_pillar", (155, 4): "minecraft:quartz_pillar",
+    # Prismarine
+    (168, 1): "minecraft:prismarine_bricks", (168, 2): "minecraft:dark_prismarine",
+    # Concrete (16 colors)
+    **{(251, d): f"minecraft:{c}_concrete" for d, c in enumerate(_COLORS)},
+    # Concrete powder (16 colors)
+    **{(252, d): f"minecraft:{c}_concrete_powder" for d, c in enumerate(_COLORS)},
+}
+
+_LOOKUP = None
+
+def _build_lookup():
+    global _LOOKUP
+    lookup = np.full(256 * 16, "minecraft:air", dtype=object)
+    for bid, name in BLOCK_ID_TO_NAME.items():
+        for dat in range(16):
+            lookup[bid * 16 + dat] = name
+    for (bid, dat), name in BLOCK_ID_DATA_TO_NAME.items():
+        lookup[bid * 16 + dat] = name
+    _LOOKUP = lookup
+
 
 def load_schematic(file_path: str) -> np.ndarray:
+    global _LOOKUP
+    if _LOOKUP is None:
+        _build_lookup()
+
     nbt = nbtlib.load(file_path)
     root = nbt.get("Schematic", nbt)
 
@@ -125,13 +241,15 @@ def load_schematic(file_path: str) -> np.ndarray:
                 lookup[k] = v
         return lookup[np.clip(raw, 0, max_id - 1)]
 
-    raw = np.array(nbt.get("Blocks", []), dtype=np.int32).ravel()
-    if len(raw) < total:
-        raw = np.pad(raw, (0, total - len(raw)))
-    raw = (raw[:total] & 0xFF).reshape(height, length, width)
-    max_id = 256
-    lookup = np.full(max_id, "minecraft:air", dtype=object)
-    for k, v in BLOCK_ID_TO_NAME.items():
-        if k < max_id:
-            lookup[k] = v
-    return lookup[raw]
+    blocks = np.array(nbt.get("Blocks", []), dtype=np.int32).ravel()
+    data = np.array(nbt.get("Data", []), dtype=np.int32).ravel()
+
+    if len(blocks) < total:
+        blocks = np.pad(blocks, (0, total - len(blocks)))
+    if len(data) < total:
+        data = np.pad(data, (0, total - len(data)))
+
+    blocks = (blocks[:total] & 0xFF).reshape(height, length, width)
+    data = (data[:total] & 0x0F).reshape(height, length, width)
+
+    return _LOOKUP[blocks * 16 + data]
