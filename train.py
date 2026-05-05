@@ -152,7 +152,9 @@ def main():
             optim.load_state_dict(ckpt["optim"])
             sched.load_state_dict(ckpt["sched"])
         except (ValueError, RuntimeError):
-            print("Optimizer state incompatible — fresh optimizer, scheduler fast-forwarded")
+            print(
+                "Optimizer state incompatible — fresh optimizer, scheduler fast-forwarded"
+            )
             sched = torch.optim.lr_scheduler.LambdaLR(
                 optim,
                 lr_lambda=lambda s: lr_schedule(s, args.warmup_steps, args.max_steps),
@@ -229,20 +231,23 @@ def main():
                 val_losses = []
                 t_levels = [0.5, 0.8]
                 non_air_buckets = {t: [] for t in t_levels}
-                common_buckets  = {t: [] for t in t_levels}
-                rare_buckets    = {t: [] for t in t_levels}
+                common_buckets = {t: [] for t in t_levels}
+                rare_buckets = {t: [] for t in t_levels}
                 with torch.no_grad():
                     for val_batch in val_loader:
                         vb = val_batch["blocks"].to(device)
                         vc = val_batch["condition_mask"].to(device)
-                        val_losses.append(compute_loss(model, vb, vc, args.air_weight).item())
+                        val_losses.append(
+                            compute_loss(model, vb, vc, args.air_weight).item()
+                        )
                         for t in t_levels:
                             non_air, common, rare = compute_accuracy(model, vb, vc, t)
                             non_air_buckets[t].append(non_air)
                             common_buckets[t].append(common)
                             rare_buckets[t].append(rare)
 
-                def avg(lst): return sum(lst) / max(1, len(lst))
+                def avg(lst):
+                    return sum(lst) / max(1, len(lst))
 
                 avg_val = avg(val_losses)
                 lines = [f"  val_loss={avg_val:.4f}"]
@@ -255,10 +260,23 @@ def main():
                 tqdm.write("\n".join(lines))
 
                 viz_path = os.path.join(run_dir, f"viz_step{global_step:07d}.png")
-                save_sample_viz(ema_model, fixed_viz_blocks[:1], fixed_viz_mask[:1], viz_path, global_step)
+                save_sample_viz(
+                    ema_model,
+                    fixed_viz_blocks[:1],
+                    fixed_viz_mask[:1],
+                    viz_path,
+                    global_step,
+                )
 
                 viz3d_path = os.path.join(run_dir, f"viz3d_step{global_step:07d}.html")
-                save_3d_viz(ema_model, fixed_viz_blocks, fixed_viz_mask, viz3d_path, global_step, dataset.idx_to_block)
+                save_3d_viz(
+                    ema_model,
+                    fixed_viz_blocks,
+                    fixed_viz_mask,
+                    viz3d_path,
+                    global_step,
+                    dataset.idx_to_block,
+                )
                 tqdm.write(f"  saved viz: {viz_path}  {viz3d_path}")
 
                 model.train()
