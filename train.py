@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import copy
+import csv
 import math
 import os
 import pickle
@@ -21,10 +22,12 @@ def parse_args():
     p = argparse.ArgumentParser()
     # data
     p.add_argument("--data_dirs", nargs="+", required=True)
-    p.add_argument("--cache_dir", default="cache")
+    p.add_argument("--writcache_dir", default="writcache")
+    p.add_argument("--npy_dir", default="npy")
     p.add_argument("--output_dir", default="runs")
     p.add_argument("--chunk_size", type=int, default=32)
     p.add_argument("--min_fill", type=float, default=0.02)
+    p.add_argument("--max_files", type=int, default=None)
     p.add_argument("--val_fraction", type=float, default=0.05)
     # training
     p.add_argument("--batch_size", type=int, default=4)
@@ -64,7 +67,6 @@ def train_epoch(
     model.train()
     total_loss = 0.0
     n = 0
-    autocast = torch.amp.autocast("cuda") if scaler else contextlib.nullcontext()
 
     bar = tqdm(loader, desc=f"  train", leave=False)
     for batch in bar:
@@ -72,7 +74,7 @@ def train_epoch(
         cond = batch["condition_mask"].to(device, non_blocking=True)
         valid = batch["valid_mask"].to(device, non_blocking=True)
 
-        with autocast:
+        with (torch.amp.autocast("cuda") if scaler else contextlib.nullcontext()):
             loss = compute_loss(model, blocks, cond, args.air_weight, valid)
 
         optim.zero_grad()
@@ -149,7 +151,9 @@ def main():
         data_dirs=args.data_dirs,
         chunk_size=args.chunk_size,
         min_fill=args.min_fill,
-        cache_dir=args.cache_dir,
+        writcache_dir=args.writcache_dir,
+        npy_dir=args.npy_dir,
+        max_files=args.max_files,
     )
     n_val = max(1, int(args.val_fraction * len(dataset)))
     n_train = len(dataset) - n_val
@@ -195,6 +199,14 @@ def main():
     # ── Run directory ─────────────────────────────────────────────────────────
     run_dir = Path(args.output_dir) / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    metrics_csv = run_dir / "metrics.csv"
+    with open(metrics_csv, "w", newline="") as f:
+        csv.writer(f).writerow([
+            "epoch", "step", "train_loss", "val_loss",
+            "non_air_t0.5", "common_t0.5", "rare_t0.5",
+            "non_air_t0.8", "common_t0.8", "rare_t0.8",
+        ])
 
     with open(run_dir / "vocab.pkl", "wb") as f:
         pickle.dump(
@@ -244,7 +256,7 @@ def main():
         try:
             optim.load_state_dict(ckpt["optim"])
             sched.load_state_dict(ckpt["sched"])
-        except ValueError, RuntimeError:
+        except (ValueError, RuntimeError):
             print("Optimizer state incompatible — fresh optimizer")
             sched = torch.optim.lr_scheduler.LambdaLR(
                 optim,
@@ -259,7 +271,7 @@ def main():
 
     # ── Fixed viz batch (loaded once, stays constant) ─────────────────────────
     _viz_batch = next(
-        iter(DataLoader(val_set, batch_size=10, shuffle=False, num_workers=0))
+        iter(DataLoader(val_set, batch_size=3, shuffle=False, num_workers=0))
     )
     viz_blocks = _viz_batch["blocks"].to(device)
     viz_cond = _viz_batch["condition_mask"].to(device)
@@ -301,6 +313,14 @@ def main():
             ema_model, viz_blocks, viz_cond, viz3d_path, step, dataset.idx_to_block
         )
         tqdm.write(f"  viz → {Path(viz_path).name}  {Path(viz3d_path).name}")
+
+        with open(metrics_csv, "a", newline="") as f:
+            csv.writer(f).writerow([
+                epoch, step,
+                round(train_loss, 6), round(metrics["loss"], 6),
+                round(metrics["t0.5"]["non_air"], 6), round(metrics["t0.5"]["common"], 6), round(metrics["t0.5"]["rare"], 6),
+                round(metrics["t0.8"]["non_air"], 6), round(metrics["t0.8"]["common"], 6), round(metrics["t0.8"]["rare"], 6),
+            ])
 
         save_checkpoint(step, epoch, name=f"epoch{epoch:03d}")
         epoch += 1

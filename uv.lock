@@ -1072,7 +1072,7 @@ wheels = [
 [[package]]
 name = "writcache"
 version = "0.1.0"
-source = { git = "https://github.com/DemyCode/writcache.git#c9c42a2350f633156dcd3445d950244d970735af" }
+source = { git = "https://github.com/DemyCode/writcache.git#e55a4c84288d0312ca7d06c3b83b8d780f5e6390" }
 
 [[package]]
 name = "wsproto"

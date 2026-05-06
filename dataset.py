@@ -1,13 +1,14 @@
+import json
 import os
 import random
-from collections import defaultdict
+import zlib
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from writcache import cache, CacheConfig
+from writcache import writcache, CacheConfig
 
 from schematic_loader import load_any
 
@@ -20,8 +21,13 @@ def _find_schematic_files(dirs):
         for root, _, names in os.walk(d):
             for n in names:
                 if n.lower().endswith(_EXTS):
-                    files.append(os.path.join(root, n))
+                    files.append(Path(os.path.join(root, n)))
     return sorted(files)
+
+
+def _file_key(f: Path) -> str:
+    crc = zlib.crc32(str(f).encode()) & 0xFFFFFFFF
+    return f"{f.stem}_{crc:08x}"
 
 
 def _convert_to_indexed(blocks: np.ndarray, block_to_idx: dict) -> np.ndarray:
@@ -33,44 +39,73 @@ def _convert_to_indexed(blocks: np.ndarray, block_to_idx: dict) -> np.ndarray:
     return global_indices[inverse].reshape(blocks.shape)
 
 
-def _build_cache(files: list[Path], min_fill: float):
-    block_counts: dict = defaultdict(int)
-    raw_schematics = []
+def _build_dataset(files: list[Path], min_fill: float, npy_dir: Path):
+    """
+    Per-file cache: each schematic is saved as an indexed .npy file keyed by path.
+    Skips files already on disk. Vocab is append-only so existing .npy files stay valid.
+    """
+    npy_dir.mkdir(parents=True, exist_ok=True)
+    vocab_path = npy_dir / "vocab.json"
 
-    for f in tqdm(files, desc="Scanning schematics"):
+    if vocab_path.exists():
+        with open(vocab_path) as f:
+            saved = json.load(f)
+        block_to_idx: dict = saved["block_to_idx"]
+        idx_to_block: dict = {int(k): v for k, v in saved["idx_to_block"].items()}
+    else:
+        block_to_idx = {"minecraft:air": 0}
+        idx_to_block = {0: "minecraft:air"}
+
+    result_paths: list[str] = []
+    vocab_dirty = False
+
+    for f in tqdm(files, desc="Building dataset", smoothing=0):
+        npy_path = npy_dir / f"{_file_key(f)}.npy"
+        if npy_path.exists():
+            result_paths.append(str(npy_path))
+            continue
         try:
             blocks = load_any(str(f))
             if (blocks != "minecraft:air").mean() < min_fill:
                 continue
             for name in np.unique(blocks):
-                block_counts[str(name)] += 1
-            raw_schematics.append(blocks)
+                name = str(name)
+                if name not in block_to_idx:
+                    idx = len(block_to_idx)
+                    block_to_idx[name] = idx
+                    idx_to_block[idx] = name
+                    vocab_dirty = True
+            indexed = _convert_to_indexed(blocks, block_to_idx)
+            np.save(npy_path, indexed)
+            result_paths.append(str(npy_path))
+            vocab_dirty = True
         except Exception as e:
             tqdm.write(f"Skip {f}: {e}")
 
-    sorted_blocks = sorted(block_counts.items(), key=lambda x: -x[1])
+    if vocab_dirty:
+        with open(vocab_path, "w") as f:
+            json.dump(
+                {
+                    "block_to_idx": block_to_idx,
+                    "idx_to_block": {str(k): v for k, v in idx_to_block.items()},
+                },
+                f,
+            )
 
-    block_to_idx: dict = {"minecraft:air": 0}
-    idx_to_block: dict = {0: "minecraft:air"}
-    next_idx = 1
-    for name, _ in sorted_blocks:
-        if name not in block_to_idx:
-            block_to_idx[name] = next_idx
-            idx_to_block[next_idx] = name
-            next_idx += 1
-
-    indexed_schematics = []
-    for blocks in tqdm(raw_schematics, desc="Indexing schematics"):
-        indexed_schematics.append(_convert_to_indexed(blocks, block_to_idx))
-    del raw_schematics
-
-    vocab = {"block_to_idx": block_to_idx, "idx_to_block": idx_to_block}
-    return vocab, indexed_schematics
+    return {"block_to_idx": block_to_idx, "idx_to_block": idx_to_block}, result_paths
 
 
 def _sample_condition_mask(cs: int) -> np.ndarray:
     strategy = random.choices(
-        ["random", "bottom_half", "top_half", "shell", "octant", "half_axis", "thin_strip"],
+        [
+            "random",
+            "bottom_half",
+            "top_half",
+            "shell",
+            "octant",
+            "half_axis",
+            "thin_strip",
+        ],
         weights=[0.35, 0.20, 0.08, 0.12, 0.12, 0.08, 0.05],
     )[0]
 
@@ -128,31 +163,38 @@ class MinecraftDataset(Dataset):
         data_dirs: list,
         chunk_size: int = 32,
         min_fill: float = 0.02,
-        cache_dir: str = ".writcache",
+        writcache_dir: str = "writcache",
+        npy_dir: str = "npy",
+        max_files: int | None = None,
     ):
         self.chunk_size = chunk_size
 
         files = _find_schematic_files(data_dirs)
+        if max_files:
+            files = files[:max_files]
         if not files:
             raise RuntimeError(f"No schematic files found in {data_dirs}")
         print(f"Found {len(files)} schematic files")
 
-        cfg = CacheConfig(cache_dir=Path(cache_dir))
-        path_files = [Path(f) for f in files]
-        vocab, self._schematics = cache(_build_cache, config=cfg)(path_files, min_fill)
+        cfg = CacheConfig(cache_dir=Path(writcache_dir))
+        vocab, self._schematic_paths = writcache(_build_dataset, config=cfg)(
+            files, min_fill, Path(npy_dir)
+        )
 
         self.block_to_idx: dict = vocab["block_to_idx"]
         self.idx_to_block: dict = vocab["idx_to_block"]
         self.vocab_size: int = len(self.block_to_idx)
         self.mask_idx: int = self.vocab_size
 
-        print(f"Dataset: {len(self._schematics)} schematics, vocab size {self.vocab_size}")
+        print(
+            f"Dataset: {len(self._schematic_paths)} schematics, vocab size {self.vocab_size}"
+        )
 
     def __len__(self) -> int:
-        return len(self._schematics)
+        return len(self._schematic_paths)
 
     def __getitem__(self, idx: int) -> dict:
-        blocks = self._schematics[idx]
+        blocks = np.load(self._schematic_paths[idx], mmap_mode="r")
         cs = self.chunk_size
         h, l, w = blocks.shape
 
@@ -166,7 +208,7 @@ class MinecraftDataset(Dataset):
                 chunk = blocks[y : y + cs, z : z + cs, x : x + cs]
                 if (chunk != 0).mean() >= 0.02:
                     break
-            chunk = chunk.copy()
+            chunk = np.array(chunk)
             valid_mask = np.ones((cs, cs, cs), dtype=bool)
 
         k = random.randint(0, 3)
@@ -188,7 +230,7 @@ class MinecraftDataset(Dataset):
 
     def _pad_chunk(self, blocks: np.ndarray, cs: int) -> tuple[np.ndarray, np.ndarray]:
         h, l, w = blocks.shape
-        chunk = np.zeros((cs, cs, cs), dtype=blocks.dtype)
+        chunk = np.zeros((cs, cs, cs), dtype=np.int16)
         valid_mask = np.zeros((cs, cs, cs), dtype=bool)
 
         def slices(dim_size):

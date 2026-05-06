@@ -1,4 +1,8 @@
 cache/
+npy
+.writcache_usable
+dataset_report.csv
+dataset_report.json
 runs/
 __pycache__/
 *.py[cod]
