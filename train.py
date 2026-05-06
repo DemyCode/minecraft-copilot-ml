@@ -68,7 +68,7 @@ def train_epoch(
         cond = batch["condition_mask"].to(device, non_blocking=True)
         valid = batch["valid_mask"].to(device, non_blocking=True)
 
-        with (torch.amp.autocast("cuda") if scaler else contextlib.nullcontext()):
+        with torch.amp.autocast("cuda") if scaler else contextlib.nullcontext():
             loss = compute_loss(model, blocks, cond, args.air_weight, valid)
 
         optim.zero_grad(set_to_none=True)
@@ -179,7 +179,7 @@ def main():
     ema_model = copy.deepcopy(model)
     ema_model.requires_grad_(False).eval()
 
-    model = torch.compile(model)
+    # model = torch.compile(model)
 
     optim = schedulefree.AdamWScheduleFree(
         model.parameters(),
@@ -197,11 +197,20 @@ def main():
 
     metrics_csv = run_dir / "metrics.csv"
     with open(metrics_csv, "w", newline="") as f:
-        csv.writer(f).writerow([
-            "epoch", "step", "train_loss", "val_loss",
-            "non_air_t0.5", "common_t0.5", "rare_t0.5",
-            "non_air_t0.8", "common_t0.8", "rare_t0.8",
-        ])
+        csv.writer(f).writerow(
+            [
+                "epoch",
+                "step",
+                "train_loss",
+                "val_loss",
+                "non_air_t0.5",
+                "common_t0.5",
+                "rare_t0.5",
+                "non_air_t0.8",
+                "common_t0.8",
+                "rare_t0.8",
+            ]
+        )
 
     with open(run_dir / "vocab.pkl", "wb") as f:
         pickle.dump(
@@ -251,7 +260,7 @@ def main():
         start_epoch = ckpt.get("epoch", 0)
         try:
             optim.load_state_dict(ckpt["optim"])
-        except (ValueError, RuntimeError):
+        except ValueError, RuntimeError:
             print("Optimizer state incompatible — fresh optimizer")
         if scaler and ckpt.get("scaler"):
             scaler.load_state_dict(ckpt["scaler"])
@@ -304,12 +313,20 @@ def main():
         tqdm.write(f"  viz → {Path(viz_path).name}  {Path(viz3d_path).name}")
 
         with open(metrics_csv, "a", newline="") as f:
-            csv.writer(f).writerow([
-                epoch, step,
-                round(train_loss, 6), round(metrics["loss"], 6),
-                round(metrics["t0.5"]["non_air"], 6), round(metrics["t0.5"]["common"], 6), round(metrics["t0.5"]["rare"], 6),
-                round(metrics["t0.8"]["non_air"], 6), round(metrics["t0.8"]["common"], 6), round(metrics["t0.8"]["rare"], 6),
-            ])
+            csv.writer(f).writerow(
+                [
+                    epoch,
+                    step,
+                    round(train_loss, 6),
+                    round(metrics["loss"], 6),
+                    round(metrics["t0.5"]["non_air"], 6),
+                    round(metrics["t0.5"]["common"], 6),
+                    round(metrics["t0.5"]["rare"], 6),
+                    round(metrics["t0.8"]["non_air"], 6),
+                    round(metrics["t0.8"]["common"], 6),
+                    round(metrics["t0.8"]["rare"], 6),
+                ]
+            )
 
         save_checkpoint(step, epoch, name=f"epoch{epoch:03d}")
         epoch += 1
