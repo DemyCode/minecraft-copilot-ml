@@ -39,58 +39,53 @@ def _convert_to_indexed(blocks: np.ndarray, block_to_idx: dict) -> np.ndarray:
     return global_indices[inverse].reshape(blocks.shape)
 
 
-def _build_dataset(files: list[Path], min_fill: float, npy_dir: Path):
+def _build_dataset(files: list[Path], min_fill: float, npy_dir_str: str):
     """
     Per-file cache: each schematic is saved as an indexed .npy file keyed by path.
-    Skips files already on disk. Vocab is append-only so existing .npy files stay valid.
+    A sidecar .json stores the block names so vocab can be reconstructed on any run
+    without re-reading original files.
+    npy_dir is passed as a string so writcache hashes it as a stable key (not by contents).
     """
+    npy_dir = Path(npy_dir_str)
     npy_dir.mkdir(parents=True, exist_ok=True)
-    vocab_path = npy_dir / "vocab.json"
 
-    if vocab_path.exists():
-        with open(vocab_path) as f:
-            saved = json.load(f)
-        block_to_idx: dict = saved["block_to_idx"]
-        idx_to_block: dict = {int(k): v for k, v in saved["idx_to_block"].items()}
-    else:
-        block_to_idx = {"minecraft:air": 0}
-        idx_to_block = {0: "minecraft:air"}
-
+    block_to_idx: dict = {"minecraft:air": 0}
+    idx_to_block: dict = {0: "minecraft:air"}
     result_paths: list[str] = []
-    vocab_dirty = False
 
     for f in tqdm(files, desc="Building dataset", smoothing=0):
-        npy_path = npy_dir / f"{_file_key(f)}.npy"
-        if npy_path.exists():
-            result_paths.append(str(npy_path))
-            continue
-        try:
-            blocks = load_any(str(f))
-            if (blocks != "minecraft:air").mean() < min_fill:
-                continue
-            for name in np.unique(blocks):
-                name = str(name)
+        key = _file_key(f)
+        npy_path = npy_dir / f"{key}.npy"
+        meta_path = npy_dir / f"{key}.json"
+
+        if npy_path.exists() and meta_path.exists():
+            with open(meta_path) as mf:
+                block_names: list[str] = json.load(mf)
+            for name in block_names:
                 if name not in block_to_idx:
                     idx = len(block_to_idx)
                     block_to_idx[name] = idx
                     idx_to_block[idx] = name
-                    vocab_dirty = True
+            result_paths.append(str(npy_path))
+            continue
+
+        try:
+            blocks = load_any(str(f))
+            if (blocks != "minecraft:air").mean() < min_fill:
+                continue
+            block_names = [str(n) for n in np.unique(blocks)]
+            for name in block_names:
+                if name not in block_to_idx:
+                    idx = len(block_to_idx)
+                    block_to_idx[name] = idx
+                    idx_to_block[idx] = name
             indexed = _convert_to_indexed(blocks, block_to_idx)
             np.save(npy_path, indexed)
+            with open(meta_path, "w") as mf:
+                json.dump(block_names, mf)
             result_paths.append(str(npy_path))
-            vocab_dirty = True
         except Exception as e:
             tqdm.write(f"Skip {f}: {e}")
-
-    if vocab_dirty:
-        with open(vocab_path, "w") as f:
-            json.dump(
-                {
-                    "block_to_idx": block_to_idx,
-                    "idx_to_block": {str(k): v for k, v in idx_to_block.items()},
-                },
-                f,
-            )
 
     return {"block_to_idx": block_to_idx, "idx_to_block": idx_to_block}, result_paths
 
@@ -178,7 +173,7 @@ class MinecraftDataset(Dataset):
 
         cfg = CacheConfig(cache_dir=Path(writcache_dir))
         vocab, self._schematic_paths = writcache(_build_dataset, config=cfg)(
-            files, min_fill, Path(npy_dir)
+            files, min_fill, str(Path(npy_dir).resolve())
         )
 
         self.block_to_idx: dict = vocab["block_to_idx"]

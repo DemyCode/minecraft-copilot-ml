@@ -11,6 +11,7 @@ dependencies = [
     "playwright>=1.59.0",
     "plotly>=5.0.0",
     "requests>=2.33.1",
+    "schedulefree>=1.4.1",
     "selenium>=4.43.0",
     "torch>=2.7.0",
     "tqdm>=4.66.0",

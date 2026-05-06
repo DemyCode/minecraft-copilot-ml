@@ -3,6 +3,7 @@ npy
 .writcache_usable
 dataset_report.csv
 dataset_report.json
+writcache
 runs/
 __pycache__/
 *.py[cod]

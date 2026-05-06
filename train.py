@@ -2,12 +2,12 @@ import argparse
 import contextlib
 import copy
 import csv
-import math
 import os
 import pickle
 from datetime import datetime
 from pathlib import Path
 
+import schedulefree
 import torch
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
@@ -54,17 +54,11 @@ def parse_args():
     return p.parse_args()
 
 
-def cosine_schedule(step: int, warmup_steps: int, max_steps: int) -> float:
-    if step < warmup_steps:
-        return step / warmup_steps
-    progress = (step - warmup_steps) / max(1, max_steps - warmup_steps)
-    return 0.5 * (1.0 + math.cos(math.pi * progress))
-
-
 def train_epoch(
-    model, ema_model, loader, optim, sched, scaler, device, args, step, epoch, save_fn
+    model, ema_model, loader, optim, scaler, device, args, step, epoch, save_fn
 ):
     model.train()
+    optim.train()
     total_loss = 0.0
     n = 0
 
@@ -77,7 +71,7 @@ def train_epoch(
         with (torch.amp.autocast("cuda") if scaler else contextlib.nullcontext()):
             loss = compute_loss(model, blocks, cond, args.air_weight, valid)
 
-        optim.zero_grad()
+        optim.zero_grad(set_to_none=True)
         if scaler:
             scaler.scale(loss).backward()
             scaler.unscale_(optim)
@@ -89,8 +83,6 @@ def train_epoch(
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optim.step()
 
-        sched.step()
-
         with torch.no_grad():
             for p_ema, p in zip(ema_model.parameters(), model.parameters()):
                 p_ema.lerp_(p, 1.0 - args.ema_decay)
@@ -99,7 +91,7 @@ def train_epoch(
         total_loss += lv
         n += 1
         step += 1
-        bar.set_postfix(loss=f"{lv:.4f}", lr=f"{sched.get_last_lr()[0]:.2e}")
+        bar.set_postfix(loss=f"{lv:.4f}", lr=f"{optim.param_groups[0]['lr']:.2e}")
 
         if step % args.save_every == 0:
             save_fn(step, epoch)
@@ -145,6 +137,7 @@ def main():
         args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
     print(f"Device: {device}")
+    torch.backends.cudnn.benchmark = True
 
     # ── Dataset ───────────────────────────────────────────────────────────────
     dataset = MinecraftDataset(
@@ -186,11 +179,13 @@ def main():
     ema_model = copy.deepcopy(model)
     ema_model.requires_grad_(False).eval()
 
-    optim = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
-    )
-    sched = torch.optim.lr_scheduler.LambdaLR(
-        optim, lr_lambda=lambda s: cosine_schedule(s, args.warmup_steps, args.max_steps)
+    model = torch.compile(model)
+
+    optim = schedulefree.AdamWScheduleFree(
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        warmup_steps=args.warmup_steps,
     )
     scaler = (
         torch.amp.GradScaler("cuda") if args.amp and device.type == "cuda" else None
@@ -223,12 +218,12 @@ def main():
     def save_checkpoint(current_step, current_epoch, name=None):
         tag = name or f"step{current_step:07d}"
         path = run_dir / f"ckpt_{tag}.pt"
+        optim.eval()
         torch.save(
             {
                 "model": model.state_dict(),
                 "ema_model": ema_model.state_dict(),
                 "optim": optim.state_dict(),
-                "sched": sched.state_dict(),
                 "scaler": scaler.state_dict() if scaler else None,
                 "step": current_step,
                 "epoch": current_epoch,
@@ -237,6 +232,7 @@ def main():
             },
             path,
         )
+        optim.train()
         tqdm.write(f"  saved → {path.name}")
 
     # ── Resume ────────────────────────────────────────────────────────────────
@@ -255,16 +251,8 @@ def main():
         start_epoch = ckpt.get("epoch", 0)
         try:
             optim.load_state_dict(ckpt["optim"])
-            sched.load_state_dict(ckpt["sched"])
         except (ValueError, RuntimeError):
             print("Optimizer state incompatible — fresh optimizer")
-            sched = torch.optim.lr_scheduler.LambdaLR(
-                optim,
-                lr_lambda=lambda s: cosine_schedule(
-                    s, args.warmup_steps, args.max_steps
-                ),
-                last_epoch=step - 1,
-            )
         if scaler and ckpt.get("scaler"):
             scaler.load_state_dict(ckpt["scaler"])
         print(f"Resumed from step {step}, epoch {start_epoch}")
@@ -286,7 +274,6 @@ def main():
             ema_model,
             train_loader,
             optim,
-            sched,
             scaler,
             device,
             args,
@@ -295,7 +282,9 @@ def main():
             save_fn=save_checkpoint,
         )
 
+        optim.eval()
         metrics = validate(ema_model, val_loader, device, args)
+        optim.train()
         model.train()
 
         print(
