@@ -56,7 +56,9 @@ def compute_accuracy(
     blocks_f = blocks.float()
     unknown = ~condition_mask
     absorb_prob = t_tensor[:, None, None, None].expand_as(blocks_f)
-    noise_mask = (torch.rand_like(blocks_f) < absorb_prob) & unknown
+    with torch.random.fork_rng(devices=[device] if device.type == "cuda" else []):
+        torch.manual_seed(0)
+        noise_mask = (torch.rand_like(blocks_f) < absorb_prob) & unknown
 
     if not noise_mask.any():
         return 0.0, 0.0, 0.0

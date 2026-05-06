@@ -40,8 +40,7 @@ def _build_cache(files: list[Path], min_fill: float):
     for f in tqdm(files, desc="Scanning schematics"):
         try:
             blocks = load_any(str(f))
-            fill = (blocks != "minecraft:air").mean()
-            if fill < min_fill:
+            if (blocks != "minecraft:air").mean() < min_fill:
                 continue
             for name in np.unique(blocks):
                 block_counts[str(name)] += 1
@@ -160,10 +159,14 @@ class MinecraftDataset(Dataset):
         if h < cs or l < cs or w < cs:
             chunk, valid_mask = self._pad_chunk(blocks, cs)
         else:
-            y = random.randint(0, h - cs)
-            z = random.randint(0, l - cs)
-            x = random.randint(0, w - cs)
-            chunk = blocks[y : y + cs, z : z + cs, x : x + cs].copy()
+            for _ in range(8):
+                y = random.randint(0, h - cs)
+                z = random.randint(0, l - cs)
+                x = random.randint(0, w - cs)
+                chunk = blocks[y : y + cs, z : z + cs, x : x + cs]
+                if (chunk != 0).mean() >= 0.02:
+                    break
+            chunk = chunk.copy()
             valid_mask = np.ones((cs, cs, cs), dtype=bool)
 
         k = random.randint(0, 3)

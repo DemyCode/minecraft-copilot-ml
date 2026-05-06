@@ -24,7 +24,7 @@ class SinusoidalTimeEmbedding(nn.Module):
         )
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        x = t.float().unsqueeze(1) * self.freqs.unsqueeze(0)
+        x = (t * 1000.0).float().unsqueeze(1) * self.freqs.unsqueeze(0)
         emb = torch.cat([x.sin(), x.cos()], dim=-1)
         return self.proj(emb)
 
