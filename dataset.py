@@ -9,7 +9,9 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from writcache import cache, CacheConfig
 
-from schematic_loader import load_schematic
+from schematic_loader import load_any
+
+_EXTS = (".schematic", ".schem", ".litematic")
 
 
 def _find_schematic_files(dirs):
@@ -17,7 +19,7 @@ def _find_schematic_files(dirs):
     for d in dirs:
         for root, _, names in os.walk(d):
             for n in names:
-                if n.endswith(".schematic") or n.endswith(".schem"):
+                if n.lower().endswith(_EXTS):
                     files.append(os.path.join(root, n))
     return sorted(files)
 
@@ -31,13 +33,16 @@ def _convert_to_indexed(blocks: np.ndarray, block_to_idx: dict) -> np.ndarray:
     return global_indices[inverse].reshape(blocks.shape)
 
 
-def _build_cache(files: list[Path], chunk_size: int, min_fill: float):
+def _build_cache(files: list[Path], min_fill: float):
     block_counts: dict = defaultdict(int)
     raw_schematics = []
 
     for f in tqdm(files, desc="Scanning schematics"):
         try:
-            blocks = load_schematic(str(f))
+            blocks = load_any(str(f))
+            fill = (blocks != "minecraft:air").mean()
+            if fill < min_fill:
+                continue
             for name in np.unique(blocks):
                 block_counts[str(name)] += 1
             raw_schematics.append(blocks)
@@ -56,31 +61,12 @@ def _build_cache(files: list[Path], chunk_size: int, min_fill: float):
             next_idx += 1
 
     indexed_schematics = []
-    chunk_index = []
-
-    for s_idx, blocks in enumerate(tqdm(raw_schematics, desc="Indexing schematics")):
-        indexed = _convert_to_indexed(blocks, block_to_idx)
-        indexed_schematics.append(indexed)
-
-        h, l, w = indexed.shape
-        cs = chunk_size
-
-        if h < cs or l < cs or w < cs:
-            if (indexed != 0).mean() >= min_fill:
-                chunk_index.append((s_idx, -1, -1, -1))
-        else:
-            stride = cs // 2
-            for y in range(0, h - cs + 1, stride):
-                for z in range(0, l - cs + 1, stride):
-                    for x in range(0, w - cs + 1, stride):
-                        chunk = indexed[y : y + cs, z : z + cs, x : x + cs]
-                        if (chunk != 0).mean() >= min_fill:
-                            chunk_index.append((s_idx, y, z, x))
-
+    for blocks in tqdm(raw_schematics, desc="Indexing schematics"):
+        indexed_schematics.append(_convert_to_indexed(blocks, block_to_idx))
     del raw_schematics
 
     vocab = {"block_to_idx": block_to_idx, "idx_to_block": idx_to_block}
-    return vocab, indexed_schematics, chunk_index
+    return vocab, indexed_schematics
 
 
 def _sample_condition_mask(cs: int) -> np.ndarray:
@@ -142,7 +128,7 @@ class MinecraftDataset(Dataset):
         self,
         data_dirs: list,
         chunk_size: int = 32,
-        min_fill: float = 0.10,
+        min_fill: float = 0.02,
         cache_dir: str = ".writcache",
     ):
         self.chunk_size = chunk_size
@@ -154,26 +140,29 @@ class MinecraftDataset(Dataset):
 
         cfg = CacheConfig(cache_dir=Path(cache_dir))
         path_files = [Path(f) for f in files]
-        vocab, self._schematics, self._chunk_index = cache(_build_cache, config=cfg)(path_files, chunk_size, min_fill)
+        vocab, self._schematics = cache(_build_cache, config=cfg)(path_files, min_fill)
 
         self.block_to_idx: dict = vocab["block_to_idx"]
         self.idx_to_block: dict = vocab["idx_to_block"]
         self.vocab_size: int = len(self.block_to_idx)
         self.mask_idx: int = self.vocab_size
 
-        print(f"Dataset: {len(self._chunk_index)} chunks, vocab size {self.vocab_size}")
+        print(f"Dataset: {len(self._schematics)} schematics, vocab size {self.vocab_size}")
 
     def __len__(self) -> int:
-        return len(self._chunk_index)
+        return len(self._schematics)
 
     def __getitem__(self, idx: int) -> dict:
-        s_idx, y, z, x = self._chunk_index[idx]
-        blocks = self._schematics[s_idx]
+        blocks = self._schematics[idx]
         cs = self.chunk_size
+        h, l, w = blocks.shape
 
-        if y == -1:
+        if h < cs or l < cs or w < cs:
             chunk, valid_mask = self._pad_chunk(blocks, cs)
         else:
+            y = random.randint(0, h - cs)
+            z = random.randint(0, l - cs)
+            x = random.randint(0, w - cs)
             chunk = blocks[y : y + cs, z : z + cs, x : x + cs].copy()
             valid_mask = np.ones((cs, cs, cs), dtype=bool)
 

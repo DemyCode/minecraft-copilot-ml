@@ -211,6 +211,11 @@ def _build_lookup():
     _LOOKUP = lookup
 
 
+def _norm(name: str) -> str:
+    """Strip block state properties: 'minecraft:oak_log[axis=y]' -> 'minecraft:oak_log'."""
+    return name.split("[")[0]
+
+
 def load_schematic(file_path: str) -> np.ndarray:
     global _LOOKUP
     if _LOOKUP is None:
@@ -228,8 +233,8 @@ def load_schematic(file_path: str) -> np.ndarray:
 
     total = height * length * width
 
-    if "Palette" in root:
-        palette = {int(v): str(k) for k, v in root["Palette"].items()}
+    if "Palette" in root and "BlockData" in root:
+        palette = {int(v): _norm(str(k)) for k, v in root["Palette"].items()}
         raw = np.array(root["BlockData"], dtype=np.int32).ravel()
         if len(raw) < total:
             raw = np.pad(raw, (0, total - len(raw)))
@@ -253,3 +258,67 @@ def load_schematic(file_path: str) -> np.ndarray:
     data = (data[:total] & 0x0F).reshape(height, length, width)
 
     return _LOOKUP[blocks * 16 + data]
+
+
+def _unpack_litematic(longs: np.ndarray, n: int, bits: int) -> np.ndarray:
+    """Unpack n values from packed longs using litematica's straddling bit format.
+
+    Litematica stores block entries that CAN straddle 64-bit long boundaries,
+    unlike Minecraft's chunk format which aligns entries within each long.
+    Formula: start = i*bits, sa = start//64, ea = (start+bits-1)//64, sb = start%64
+    """
+    longs_u = longs.view(np.uint64)
+    mask = np.uint64((1 << bits) - 1)
+    i = np.arange(n, dtype=np.int64)
+    start = i * bits
+    sa = (start >> 6).astype(np.intp)
+    ea = ((start + bits - 1) >> 6).astype(np.intp)
+    sb = (start & 63).astype(np.uint64)
+    v = longs_u[sa] >> sb
+    straddle = sa != ea
+    if straddle.any():
+        ea_safe = np.minimum(ea, len(longs_u) - 1)
+        v = np.where(straddle, v | (longs_u[ea_safe] << (np.uint64(64) - sb)), v)
+    return (v & mask).astype(np.int32)
+
+
+def load_litematic(file_path: str) -> np.ndarray:
+    """Load a .litematic file (Litematica mod format). Returns the largest region."""
+    nbt = nbtlib.load(file_path)
+    regions = nbt["Regions"]
+
+    best: np.ndarray | None = None
+    best_size = 0
+
+    for region in regions.values():
+        palette = [_norm(str(b["Name"])) for b in region["BlockStatePalette"]]
+        sx = abs(int(region["Size"]["x"]))
+        sy = abs(int(region["Size"]["y"]))
+        sz = abs(int(region["Size"]["z"]))
+        total = sx * sy * sz
+        if total == 0 or total <= best_size:
+            continue
+
+        if len(palette) <= 1:
+            name = palette[0] if palette else "minecraft:air"
+            arr = np.full((sy, sz, sx), name, dtype=object)
+        else:
+            bits = max(int(np.ceil(np.log2(len(palette)))), 2)
+            longs = np.array(region["BlockStates"], dtype=np.int64)
+            indices = _unpack_litematic(longs, total, bits)
+            palette_arr = np.array(palette, dtype=object)
+            arr = palette_arr[indices.clip(0, len(palette) - 1)].reshape(sy, sz, sx)
+
+        best_size = total
+        best = arr
+
+    if best is None:
+        raise ValueError(f"No valid regions in {file_path}")
+    return best
+
+
+def load_any(file_path: str) -> np.ndarray:
+    """Load any supported Minecraft structure format (.schematic, .schem, .litematic)."""
+    if file_path.lower().endswith(".litematic"):
+        return load_litematic(file_path)
+    return load_schematic(file_path)
