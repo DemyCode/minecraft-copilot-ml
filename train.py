@@ -39,7 +39,6 @@ def parse_args():
     p.add_argument("--air_weight", type=float, default=0.1)
     p.add_argument("--ema_decay", type=float, default=0.9999)
     p.add_argument("--max_steps", type=int, default=500_000)
-    p.add_argument("--save_every", type=int, default=5000)
     # model
     p.add_argument("--embed_dim", type=int, default=128)
     p.add_argument("--base_channels", type=int, default=64)
@@ -55,7 +54,7 @@ def parse_args():
 
 
 def train_epoch(
-    model, ema_model, loader, optim, scaler, device, args, step, epoch, save_fn
+    model, ema_model, loader, optim, scaler, device, args, step, epoch
 ):
     model.train()
     optim.train()
@@ -91,10 +90,7 @@ def train_epoch(
         total_loss += lv
         n += 1
         step += 1
-        bar.set_postfix(loss=f"{lv:.4f}", lr=f"{optim.param_groups[0]['lr']:.2e}")
-
-        if step % args.save_every == 0:
-            save_fn(step, epoch)
+        bar.set_postfix(loss=f"{total_loss/n:.4f}", lr=f"{optim.param_groups[0]['lr']:.2e}")
 
         if step >= args.max_steps:
             break
@@ -109,12 +105,14 @@ def validate(model, loader, device, args):
     t_levels = (0.5, 0.8)
     buckets = {t: {"non_air": [], "common": [], "rare": []} for t in t_levels}
 
-    for batch in tqdm(loader, desc=f"  val  ", leave=False):
+    bar = tqdm(loader, desc=f"  val  ", leave=False)
+    for batch in bar:
         blocks = batch["blocks"].to(device, non_blocking=True)
         cond = batch["condition_mask"].to(device, non_blocking=True)
         valid = batch["valid_mask"].to(device, non_blocking=True)
 
         losses.append(compute_loss(model, blocks, cond, args.air_weight, valid).item())
+        bar.set_postfix(loss=f"{sum(losses)/len(losses):.4f}")
 
         for t, b in buckets.items():
             na, co, ra = compute_accuracy(model, blocks, cond, t)
@@ -242,7 +240,7 @@ def main():
             path,
         )
         optim.train()
-        tqdm.write(f"  saved → {path.name}")
+        tqdm.write(f"  saved → {path}")
 
     # ── Resume ────────────────────────────────────────────────────────────────
     step = 0
@@ -288,7 +286,6 @@ def main():
             args,
             step,
             epoch,
-            save_fn=save_checkpoint,
         )
 
         optim.eval()
@@ -297,19 +294,25 @@ def main():
         model.train()
 
         print(
-            f"  train_loss={train_loss:.4f}  val_loss={metrics['loss']:.4f}"
-            f"  |  t=0.5  non_air={metrics['t0.5']['non_air']:.3f}"
+            f"  train_loss={train_loss:.4f}  val_loss={metrics['loss']:.4f}\n"
+            f"  t=0.5  non_air={metrics['t0.5']['non_air']:.3f}"
             f"  common={metrics['t0.5']['common']:.3f}"
-            f"  rare={metrics['t0.5']['rare']:.3f}"
-            f"  |  t=0.8  non_air={metrics['t0.8']['non_air']:.3f}"
+            f"  rare={metrics['t0.5']['rare']:.3f}\n"
+            f"  t=0.8  non_air={metrics['t0.8']['non_air']:.3f}"
+            f"  common={metrics['t0.8']['common']:.3f}"
+            f"  rare={metrics['t0.8']['rare']:.3f}"
         )
 
         viz_path = str(run_dir / f"viz_epoch{epoch:03d}.png")
         viz3d_path = str(run_dir / f"viz3d_epoch{epoch:03d}.html")
-        save_sample_viz(ema_model, viz_blocks[:1], viz_cond[:1], viz_path, step)
+        model.cpu()
+        ema_model.to(device)
+        save_sample_viz(ema_model, viz_blocks[:2], viz_cond[:2], viz_path, step)
         save_3d_viz(
-            ema_model, viz_blocks, viz_cond, viz3d_path, step, dataset.idx_to_block
+            ema_model, viz_blocks[:2], viz_cond[:2], viz3d_path, step, dataset.idx_to_block
         )
+        ema_model.cpu()
+        model.to(device)
         tqdm.write(f"  viz → {Path(viz_path).name}  {Path(viz3d_path).name}")
 
         with open(metrics_csv, "a", newline="") as f:

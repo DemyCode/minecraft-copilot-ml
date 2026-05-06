@@ -87,6 +87,7 @@ def _sample_steps(
     condition_mask: torch.Tensor,
     num_steps: int,
     temperature: float,
+    t_start: float = 1.0,
 ):
     device = condition.device
     B = condition.shape[0]
@@ -94,9 +95,14 @@ def _sample_steps(
     vocab_size = model.vocab_size
 
     x = condition.clone()
-    x[~condition_mask] = mask_idx
+    unknown = ~condition_mask
+    if t_start >= 1.0:
+        x[unknown] = mask_idx
+    else:
+        noise = torch.rand_like(x.float())
+        x[unknown & (noise < t_start)] = mask_idx
 
-    t_steps = torch.linspace(1.0, 0.0, num_steps + 1, device=device)
+    t_steps = torch.linspace(t_start, 0.0, num_steps + 1, device=device)
 
     for step in range(num_steps):
         still_masked = (x == mask_idx) & ~condition_mask
@@ -140,8 +146,9 @@ def sample(
     condition_mask: torch.Tensor,
     num_steps: int = 100,
     temperature: float = 1.0,
+    t_start: float = 1.0,
 ) -> torch.Tensor:
-    for _, x in _sample_steps(model, condition, condition_mask, num_steps, temperature):
+    for _, x in _sample_steps(model, condition, condition_mask, num_steps, temperature, t_start):
         pass
     return x
 
@@ -154,7 +161,8 @@ def sample_progressive(
     num_steps: int = 100,
     temperature: float = 1.0,
     yield_every: int = 5,
+    t_start: float = 1.0,
 ):
-    for step, x in _sample_steps(model, condition, condition_mask, num_steps, temperature):
+    for step, x in _sample_steps(model, condition, condition_mask, num_steps, temperature, t_start):
         if step == -1 or step % yield_every == 0 or step == num_steps - 1:
             yield x.clone()
